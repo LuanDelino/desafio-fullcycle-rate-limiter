@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// Memory guarda contadores e bloqueios em memória do processo.
-// Serve para testes e para rodar o servidor sem Redis; não sobrevive a
-// reinício nem funciona com mais de uma instância da aplicação.
+// Memory guarda contadores e bloqueios em memória do processo. Serve para teste
+// e para rodar sem Redis; não sobrevive a reinício nem vale para mais de uma
+// instância da aplicação.
 type Memory struct {
 	mu       sync.Mutex
 	counters map[string]*counter
@@ -27,8 +27,8 @@ func NewMemory() *Memory {
 	return NewMemoryWithClock(time.Now)
 }
 
-// NewMemoryWithClock devolve um store em memória com relógio injetável,
-// o que permite testar janela e bloqueio sem esperar tempo real.
+// NewMemoryWithClock devolve um store em memória com relógio injetável, o que
+// permite testar janela e bloqueio sem esperar tempo real.
 func NewMemoryWithClock(now func() time.Time) *Memory {
 	return &Memory{
 		counters: make(map[string]*counter),
@@ -37,7 +37,6 @@ func NewMemoryWithClock(now func() time.Time) *Memory {
 	}
 }
 
-// Increment soma 1 no contador da chave, reiniciando quando a janela venceu.
 func (m *Memory) Increment(_ context.Context, key string, window time.Duration) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -53,7 +52,6 @@ func (m *Memory) Increment(_ context.Context, key string, window time.Duration) 
 	return c.value, nil
 }
 
-// Block marca a chave como bloqueada pelo período informado.
 func (m *Memory) Block(_ context.Context, key string, duration time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -62,7 +60,6 @@ func (m *Memory) Block(_ context.Context, key string, duration time.Duration) er
 	return nil
 }
 
-// Blocked informa se a chave ainda está dentro do período de bloqueio.
 func (m *Memory) Blocked(_ context.Context, key string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

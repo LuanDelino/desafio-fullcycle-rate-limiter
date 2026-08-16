@@ -18,6 +18,10 @@ import (
 )
 
 func main() {
+	// Falha de subida é fatal de propósito: config inválida ou store fora do ar
+	// não têm recuperação em runtime, e um processo que sobe assim entraria no
+	// balanceador fingindo saúde. Panic de requisição, esse sim, é recuperado
+	// pelo middleware Recover.
 	if err := run(); err != nil {
 		slog.Error("servidor encerrado com erro", "erro", err)
 		os.Exit(1)
@@ -52,9 +56,9 @@ func run() error {
 
 	server := &http.Server{
 		Addr: ":" + cfg.ServerPort,
-		// O limiter é o filtro mais externo: ele decide antes de qualquer
-		// autenticação ou trabalho de handler.
-		Handler:           middleware.RateLimit(rateLimiter)(mux),
+		// Recover por fora para cobrir panic do próprio limiter; o limiter por
+		// fora do mux para decidir antes de qualquer trabalho de handler.
+		Handler:           middleware.Recover(middleware.RateLimit(rateLimiter)(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -82,7 +86,6 @@ func run() error {
 }
 
 // buildStore escolhe a estratégia de persistência conforme a configuração.
-// Trocar de estratégia é mudar RATE_LIMIT_STORE — nenhum outro código muda.
 func buildStore(ctx context.Context, cfg config.Config) (limiter.Store, func(), error) {
 	switch cfg.Store {
 	case "memory":

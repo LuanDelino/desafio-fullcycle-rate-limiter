@@ -26,6 +26,13 @@ func (c *checkerFake) Allow(_ context.Context, ip, token string) (limiter.Result
 	return c.result, c.err
 }
 
+// checkerEmPanico simula o limiter estourando em runtime.
+type checkerEmPanico struct{}
+
+func (checkerEmPanico) Allow(context.Context, string, string) (limiter.Result, error) {
+	panic("limiter quebrou")
+}
+
 func serve(t *testing.T, checker middleware.Checker, req *http.Request) (*httptest.ResponseRecorder, bool) {
 	t.Helper()
 

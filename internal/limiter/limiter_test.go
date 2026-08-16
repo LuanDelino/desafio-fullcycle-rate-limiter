@@ -10,8 +10,6 @@ import (
 	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter/store"
 )
 
-// clock é um relógio controlado pelo teste: a janela e o bloqueio são
-// verificados avançando o tempo, sem espera real.
 type clock struct{ now time.Time }
 
 func (c *clock) Now() time.Time          { return c.now }
@@ -74,8 +72,7 @@ func TestLimiteDoTokenSeSobrepoeAoDoIP(t *testing.T) {
 		BlockDuration: 5 * time.Minute,
 	})
 
-	// O mesmo IP passa das 2 requisições do limite de IP porque o token
-	// cadastrado vale 5 — esta é a regra de precedência do desafio.
+	// O mesmo IP passa das 2 do limite de IP porque o token cadastrado vale 5.
 	for i := 1; i <= 5; i++ {
 		if result := allow(t, l, "10.0.0.1", "abc123"); !result.Allowed {
 			t.Fatalf("requisição %d do token foi rejeitada antes do limite dele", i)
@@ -97,8 +94,6 @@ func TestTokenMaisRestritivoQueOIPValeMesmoAssim(t *testing.T) {
 
 	allow(t, l, "10.0.0.1", "restrito")
 
-	// Precedência é do token nos dois sentidos: ele também aperta o limite,
-	// não só afrouxa.
 	if result := allow(t, l, "10.0.0.1", "restrito"); result.Allowed {
 		t.Fatal("token mais restritivo que o IP não foi respeitado")
 	}
@@ -114,8 +109,6 @@ func TestTokenNaoCadastradoCaiNoLimiteDoIP(t *testing.T) {
 
 	allow(t, l, "10.0.0.1", "token-inventado")
 
-	// Se um token desconhecido ganhasse limite próprio, bastaria inventar um
-	// header para contornar o limite por IP.
 	if result := allow(t, l, "10.0.0.1", "token-inventado"); result.Allowed {
 		t.Fatal("token não cadastrado escapou do limite do IP")
 	}

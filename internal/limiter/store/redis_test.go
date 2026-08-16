@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter/store"
 )
 
@@ -30,6 +32,33 @@ func newRedis(t *testing.T) *store.Redis {
 	return redisStore
 }
 
+func newClient(t *testing.T) *redis.Client {
+	t.Helper()
+
+	addr := os.Getenv("REDIS_TEST_ADDR")
+	if addr == "" {
+		t.Skip("REDIS_TEST_ADDR não definido; pulando teste de integração")
+	}
+
+	client := redis.NewClient(&redis.Options{Addr: addr})
+	t.Cleanup(func() { _ = client.Close() })
+
+	return client
+}
+
+func countKeyDe(key string) string { return "ratelimit:count:" + key }
+
+// ttlDe lê o tempo de vida restante de uma chave; negativo significa eterna.
+func ttlDe(t *testing.T, key string) time.Duration {
+	t.Helper()
+
+	ttl, err := newClient(t).PTTL(context.Background(), key).Result()
+	if err != nil {
+		t.Fatalf("PTTL de %q: %v", key, err)
+	}
+	return ttl
+}
+
 func TestRedisIncrementCriaJanelaEExpiraSozinho(t *testing.T) {
 	redisStore := newRedis(t)
 	ctx := context.Background()
@@ -45,8 +74,6 @@ func TestRedisIncrementCriaJanelaEExpiraSozinho(t *testing.T) {
 		}
 	}
 
-	// Se o ExpireNX não estivesse na transação, ou renovasse o TTL a cada
-	// INCR, a chave nunca venceria e o contador jamais reiniciaria.
 	time.Sleep(400 * time.Millisecond)
 
 	got, err := redisStore.Increment(ctx, key, 300*time.Millisecond)
@@ -55,6 +82,56 @@ func TestRedisIncrementCriaJanelaEExpiraSozinho(t *testing.T) {
 	}
 	if got != 1 {
 		t.Fatalf("contador depois da janela = %d, esperado 1", got)
+	}
+}
+
+func TestRedisIncrementNaoRenovaAJanelaAcadaRequisicao(t *testing.T) {
+	redisStore := newRedis(t)
+	ctx := context.Background()
+	key := "teste-sem-renovar-" + t.Name()
+
+	if _, err := redisStore.Increment(ctx, key, time.Second); err != nil {
+		t.Fatalf("Increment: %v", err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if _, err := redisStore.Increment(ctx, key, time.Second); err != nil {
+		t.Fatalf("Increment: %v", err)
+	}
+
+	// O segundo acesso não pode empurrar o vencimento para frente: se
+	// empurrasse, tráfego contínuo manteria a chave viva e o contador nunca
+	// reiniciaria.
+	ttl := ttlDe(t, countKeyDe(key))
+	if ttl > 700*time.Millisecond {
+		t.Fatalf("TTL restante = %v; o segundo acesso renovou a janela", ttl)
+	}
+}
+
+func TestRedisIncrementReparaChaveSemTempoDeVida(t *testing.T) {
+	redisStore := newRedis(t)
+	ctx := context.Background()
+	key := "teste-reparo-" + t.Name()
+
+	if _, err := redisStore.Increment(ctx, key, time.Minute); err != nil {
+		t.Fatalf("Increment: %v", err)
+	}
+
+	// Simula o processo que morreu antes de marcar o TTL: a chave existe e é
+	// eterna. Sem reparo, a identidade ficaria presa nesta janela para sempre.
+	client := newClient(t)
+	if err := client.Persist(ctx, countKeyDe(key)).Err(); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+	if ttl := ttlDe(t, countKeyDe(key)); ttl >= 0 {
+		t.Fatalf("preparo do teste falhou: chave ainda tem TTL de %v", ttl)
+	}
+
+	if _, err := redisStore.Increment(ctx, key, time.Minute); err != nil {
+		t.Fatalf("Increment na chave eterna: %v", err)
+	}
+
+	if ttl := ttlDe(t, countKeyDe(key)); ttl <= 0 {
+		t.Fatalf("chave sem tempo de vida não foi reparada; TTL = %v", ttl)
 	}
 }
 
