@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -86,11 +87,15 @@ func run() error {
 }
 
 // buildStore escolhe a estratégia de persistência conforme a configuração.
+// Cada estratégia tem seu case explícito e o default é erro: com o Redis no
+// default, uma estratégia nova aceita pelo config e esquecida aqui viraria Redis
+// em silêncio, e o operador só descobriria pelo comportamento.
 func buildStore(ctx context.Context, cfg config.Config) (limiter.Store, func(), error) {
 	switch cfg.Store {
 	case "memory":
 		return store.NewMemory(), func() {}, nil
-	default:
+
+	case "redis":
 		redisStore, err := store.NewRedis(ctx, store.Options{
 			Addr:     cfg.RedisAddr,
 			Password: cfg.RedisPassword,
@@ -100,6 +105,9 @@ func buildStore(ctx context.Context, cfg config.Config) (limiter.Store, func(), 
 			return nil, nil, err
 		}
 		return redisStore, func() { _ = redisStore.Close() }, nil
+
+	default:
+		return nil, nil, fmt.Errorf("estratégia de persistência sem implementação: %q", cfg.Store)
 	}
 }
 

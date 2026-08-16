@@ -13,8 +13,14 @@ type Memory struct {
 	mu       sync.Mutex
 	counters map[string]*counter
 	blocks   map[string]time.Time
+	escritas int
 	now      func() time.Time
 }
+
+// limpezaACada amortiza a varredura de vencidos sobre este tanto de escritas.
+// Sem ela, identidade que aparece uma vez e some fica no mapa para sempre: as
+// respostas continuam certas e a memória cresce sem teto.
+const limpezaACada = 1000
 
 type counter struct {
 	value     int64
@@ -40,6 +46,8 @@ func (m *Memory) Increment(_ context.Context, key string, window time.Duration) 
 	defer m.mu.Unlock()
 
 	now := m.now()
+	m.registrarEscrita(now)
+
 	c, ok := m.counters[key]
 	if !ok || !now.Before(c.expiresAt) {
 		m.counters[key] = &counter{value: 1, expiresAt: now.Add(window)}
@@ -50,11 +58,35 @@ func (m *Memory) Increment(_ context.Context, key string, window time.Duration) 
 	return c.value, nil
 }
 
+// registrarEscrita conta a operação e varre os vencidos de tempos em tempos.
+// Precisa ser chamada com o lock tomado.
+func (m *Memory) registrarEscrita(now time.Time) {
+	m.escritas++
+	if m.escritas < limpezaACada {
+		return
+	}
+	m.escritas = 0
+
+	for key, c := range m.counters {
+		if !now.Before(c.expiresAt) {
+			delete(m.counters, key)
+		}
+	}
+	for key, until := range m.blocks {
+		if !now.Before(until) {
+			delete(m.blocks, key)
+		}
+	}
+}
+
 func (m *Memory) Block(_ context.Context, key string, duration time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.blocks[key] = m.now().Add(duration)
+	now := m.now()
+	m.registrarEscrita(now)
+	m.blocks[key] = now.Add(duration)
+
 	return nil
 }
 
