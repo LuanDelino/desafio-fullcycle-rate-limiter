@@ -6,8 +6,11 @@ de acesso e persistência no Redis. O enunciado do desafio está em
 
 ## Como rodar
 
+Tudo que é infraestrutura — Dockerfile, compose e `.env` — vive em
+[`deployments/`](deployments). Da raiz do repositório:
+
 ```bash
-docker compose up -d --build
+docker compose -f deployments/docker-compose.yml up -d --build
 ```
 
 Sobe o Redis e a aplicação na porta 8080. Para conferir:
@@ -16,16 +19,25 @@ Sobe o Redis e a aplicação na porta 8080. Para conferir:
 curl localhost:8080/
 ```
 
+Para derrubar:
+
+```bash
+docker compose -f deployments/docker-compose.yml down -v
+```
+
 ## Como testar
 
 Toda a suíte, incluindo os testes de integração contra um Redis de verdade:
 
 ```bash
-docker compose run --rm test
+docker compose -f deployments/docker-compose.yml run --rm test
 ```
 
-Os testes de integração são pulados quando `REDIS_TEST_ADDR` não está definido,
-então `go test ./...` fora do Docker roda só a parte que não precisa de Redis.
+Os testes usam [testify](https://github.com/stretchr/testify), organizados em uma
+suíte por unidade: `ConfigSuite`, `LimiterSuite`, `RedisSuite`, `RateLimitSuite` e
+`RecoverSuite`. A `RedisSuite` é pulada inteira quando `REDIS_TEST_ADDR` não está
+definido, então `go test ./...` fora do Docker roda só a parte que não precisa de
+Redis.
 
 Verificação manual do limite por IP (padrão de 10 req/s):
 
@@ -51,9 +63,16 @@ São três pontos de configuração, e o que vale depende de como você está ro
 
 | Ponto | Arquivo | Quando vale |
 |---|---|---|
-| Compose | `docker-compose.yaml`, bloco `environment` do serviço `app` | Rodando com `docker compose up` — **é o ponto que vale por padrão** |
-| Arquivo `.env` | `.env` na raiz (copie de `.env.example`) | Rodando o binário direto, fora do Docker |
-| Ambiente do processo | variável exportada no shell ou no orquestrador | Sempre; tem precedência sobre o `.env` |
+| `.env` do deployment | `deployments/.env` | Rodando com `docker compose` — **é o ponto que vale por padrão** |
+| Compose | `deployments/docker-compose.yml`, bloco `environment` do serviço `app` | Sempre que se roda pelo compose; guarda só topologia (`REDIS_ADDR`) |
+| `.env` da raiz | `.env` na raiz (copie de `deployments/.env.example`) | Rodando o binário direto, fora do Docker |
+| Ambiente do processo | variável exportada no shell ou no orquestrador | Sempre; tem precedência sobre qualquer `.env` |
+
+A divisão entre as duas primeiras linhas é proposital: **política** (limites e
+tempos) fica no `.env`, que é onde se mexe; **topologia** (o endereço do Redis)
+fica no compose, porque é o nome do serviço ao lado e não é para ser
+reconfigurado por fora. O `.env` é opcional — sem ele a aplicação sobe nos
+padrões declarados em `internal/config`.
 
 A leitura acontece em um lugar só, `internal/config/config.go`. Nenhum outro
 pacote consulta o ambiente, então esse arquivo é a lista completa do que o
@@ -104,6 +123,7 @@ Para conferir o TTL real das chaves com o sistema no ar:
 docker exec rate-limiter-redis redis-cli KEYS 'ratelimit:*'
 docker exec rate-limiter-redis redis-cli PTTL ratelimit:count:ip:172.20.0.1
 docker exec rate-limiter-redis redis-cli PTTL ratelimit:block:ip:172.20.0.1
+docker exec rate-limiter-redis redis-cli PTTL ratelimit:count:token:abc123
 ```
 
 `PTTL` responde em milissegundos; `-1` seria chave sem expiração e `-2`, chave
@@ -162,69 +182,34 @@ Para trocar o Redis por Memcached, Postgres ou o que for:
 Nada no limiter e nada no middleware muda. As duas implementações que já existem
 (`store.Redis` e `store.Memory`) são a prova de que a costura é essa e só essa.
 
-## Decisões
-
-**Janela fixa, não token bucket.** O desafio define o limite como "requisições por
-segundo" e manda rejeitar o excesso. Janela fixa é `INCR` mais TTL — duas operações
-e nenhum estado a manter. Token bucket (`golang.org/x/time/rate`) daria controle de
-rajada, mas a API dele conveniente é a que *enfileira* a requisição, e enfileirar é
-o oposto do que o desafio pede. O custo assumido: na virada da janela é possível
-concentrar até 2x o limite em um intervalo curto. Para o objetivo de barrar abuso,
-isso não muda nada; para garantia de vazão constante em um backend frágil, mudaria,
-e aí a escolha certa seria token bucket ou sliding window.
-
-**Token não cadastrado cai no limite do IP.** Se um token desconhecido ganhasse um
-limite padrão próprio, bastaria mandar um header inventado — e um diferente a cada
-requisição — para o limite por IP virar decoração. O limiter roda antes da
-autenticação e não tem como saber se o token é legítimo; só pode confiar no que
-está cadastrado.
-
-**O contador é do Redis, não do processo.** Contador em memória com duas instâncias
-da aplicação vira o dobro do limite. Por isso a implementação padrão é Redis.
-`store.Memory` existe para teste e para rodar sem Redis — não use com mais de uma
-instância.
-
-**O TTL é marcado só quando não existe, e em Go puro.** O `Increment` manda `INCR` e
-`PTTL` na mesma transação e só chama `PEXPIRE` quando a chave não tem tempo de vida.
-As duas alternativas mais curtas são armadilhas: marcar o TTL a cada requisição
-renova a janela para sempre, e sob tráfego contínuo o contador nunca reinicia;
-`ExpireNX` do go-redis fala em segundos e arredondaria uma janela de 500ms para 1s
-em silêncio. Como o `PEXPIRE` fica fora da transação, ele não é atômico com o
-`INCR` — mas a condição é "chave sem TTL", que a requisição seguinte reencontra e
-repara. Um script Lua fecharia essa fresta em um passo só; o custo é sair de Go e
-levar lógica para dentro do Redis, e a fresta aqui se conserta sozinha.
-
-**Falha do Redis responde 500, não 429 nem 200.** Se o store cai, o limiter devolve
-erro e o middleware responde 500 com log. Liberar tudo (fail-open) transformaria uma
-queda do Redis em janela aberta justamente na hora em que o sistema está pior;
-responder 429 mentiria sobre a causa para o cliente. O ponto de não-uso: sob um
-Redis instável isso derruba tráfego legítimo — aí o certo é um circuit breaker no
-store com política explícita de degradação, não trocar o default silenciosamente.
-
-**Fatal na subida, recover na requisição.** Config inválida ou Redis fora do ar no
-boot matam o processo com código 1: não há recuperação possível em runtime, e um
-processo que sobe assim entraria no balanceador fingindo saúde. Já um panic durante
-uma requisição é recuperado pelo middleware `Recover`, que é o mais externo da
-cadeia — cobre inclusive um panic do próprio limiter. O `net/http` já recupera panic
-sozinho e mantém o servidor de pé, mas encerra a conexão sem escrever status: o
-cliente vê a resposta cortada em vez de um 500, e o stack sai fora do log
-estruturado. `http.ErrAbortHandler` continua propagando, porque ali o abandono
-silencioso da resposta é intencional.
-
-**Onde este limiter não resolve.** Ele barra abuso; não expande capacidade — não
-substitui capacity planning. E limite apertado demais atrapalha operação normal
-antes de proteger qualquer coisa: os números de `RATE_LIMIT_IP` e `RATE_LIMIT_TOKENS`
-precisam sair de tráfego medido, não de chute.
-
 ## Estrutura
 
 ```
 cmd/server/             servidor HTTP e escolha da estratégia
+deployments/            Dockerfile, compose e .env
 internal/config/        leitura do ambiente (nenhum outro pacote lê env)
 internal/limiter/       regra de negócio e a interface Store
 internal/limiter/store/ implementações Redis e memória
 internal/middleware/    rate limit (request -> limiter -> 429) e recover
 ```
 
-Só Go e a biblioteca padrão na regra de negócio; as dependências externas são o
-client do Redis e o leitor de `.env`.
+Infraestrutura concentrada em `deployments/` para que a raiz mostre o que o
+projeto **é**, e não como ele é empacotado. O `deployments/.env` é versionado de
+propósito: são políticas de limite, não segredos, e o desafio pede que o projeto
+suba só com Docker. No dia em que entrar credencial de verdade ali, o arquivo sai
+do git e o valor passa a vir do orquestrador.
+
+## Testes
+
+| Suíte | Onde | O que cobre |
+|---|---|---|
+| `ConfigSuite` | `internal/config` | Padrões, leitura de cada variável, parse dos limites por token e recusa de valor inválido |
+| `LimiterSuite` | `internal/limiter` | Precedência token/IP, contagem, virada de janela, bloqueio e falha do store — com relógio controlado, sem espera real |
+| `RedisSuite` | `internal/limiter/store` | Contrato com o Redis: TTL da janela, TTL do bloqueio, janela sub-segundo e reparo de chave sem expiração |
+| `RateLimitSuite` | `internal/middleware` | Extração de IP e token, 200 no caminho feliz, 429 com a mensagem exigida, 500 na falha do limiter |
+| `RecoverSuite` | `internal/middleware` | Panic vira 500, requisição normal atravessa intacta, panic do limiter é coberto, `ErrAbortHandler` segue propagando |
+
+A separação entre `LimiterSuite` e `RedisSuite` é a mesma da arquitetura: a regra
+é provada em memória, com relógio injetado e sem I/O; o que só o Redis pode
+provar — tempo de vida real das chaves — é provado contra o Redis.
+

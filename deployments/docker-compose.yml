@@ -1,0 +1,52 @@
+name: fullcycle-rate-limiter
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: rate-limiter-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  app:
+    build:
+      # O contexto é a raiz do repositório, não esta pasta: o build precisa do
+      # go.mod e do código, que vivem um nível acima.
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: rate-limiter-app
+    ports:
+      - "8080:8080"
+    # Política de limite e tempos ficam no .env, que é o ponto de configuração.
+    # Ausente, a aplicação cai nos padrões declarados em internal/config.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Topologia é do compose, não do .env: o endereço do Redis é o nome do
+      # serviço aqui do lado e não faz sentido alguém reconfigurar por fora.
+      REDIS_ADDR: redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Roda a suíte completa, incluindo os testes de integração contra o Redis.
+  # Serviço separado para não pesar na subida normal:
+  #   docker compose -f deployments/docker-compose.yml run --rm test
+  test:
+    image: golang:1.26-alpine
+    working_dir: /src
+    volumes:
+      - ..:/src
+    environment:
+      REDIS_TEST_ADDR: redis:6379
+    command: go test ./... -v
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - test

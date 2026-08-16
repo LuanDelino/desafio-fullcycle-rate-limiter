@@ -5,67 +5,71 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/luanperes/fullcycle-rate-limiter/internal/middleware"
 )
 
-func TestPanicViraRespostaDeErroENaoDerrubaOServidor(t *testing.T) {
-	handler := middleware.Recover(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		panic("handler quebrou")
-	}))
+type RecoverSuite struct {
+	suite.Suite
+	recorder *httptest.ResponseRecorder
+}
 
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+func TestRecoverSuite(t *testing.T) {
+	suite.Run(t, new(RecoverSuite))
+}
+
+func (s *RecoverSuite) SetupTest() {
+	s.recorder = httptest.NewRecorder()
+}
+
+// serve roda a requisição pelo Recover envolvendo o handler informado.
+func (s *RecoverSuite) serve(handler http.Handler) {
+	s.T().Helper()
+
+	middleware.Recover(handler).ServeHTTP(s.recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+}
+
+func (s *RecoverSuite) TestPanicViraRespostaDeErroENaoDerrubaOServidor() {
+	emPanico := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("handler quebrou")
+	})
+
+	s.Require().NotPanics(func() { s.serve(emPanico) }, "o panic escapou do middleware")
 
 	// Sem o middleware o net/http encerraria a conexão sem status: o cliente
 	// veria a resposta cortada em vez de um erro.
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, esperado %d", rec.Code, http.StatusInternalServerError)
-	}
+	s.Equal(http.StatusInternalServerError, s.recorder.Code)
 }
 
-func TestRequisicaoNormalAtravessaORecoverIntacta(t *testing.T) {
-	handler := middleware.Recover(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func (s *RecoverSuite) TestRequisicaoNormalAtravessaORecoverIntacta() {
+	normal := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 		_, _ = w.Write([]byte("corpo original"))
-	}))
+	})
 
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	s.serve(normal)
 
-	if rec.Code != http.StatusTeapot {
-		t.Errorf("status = %d, esperado %d", rec.Code, http.StatusTeapot)
-	}
-	if got := rec.Body.String(); got != "corpo original" {
-		t.Errorf("corpo = %q, esperado %q", got, "corpo original")
-	}
+	s.Equal(http.StatusTeapot, s.recorder.Code)
+	s.Equal("corpo original", s.recorder.Body.String())
 }
 
-func TestPanicDoLimiterTambemEhRecuperado(t *testing.T) {
+func (s *RecoverSuite) TestPanicDoLimiterTambemEhRecuperado() {
 	limiterEmPanico := middleware.RateLimit(checkerEmPanico{})
-	handler := middleware.Recover(limiterEmPanico(http.HandlerFunc(
-		func(http.ResponseWriter, *http.Request) {},
-	)))
+	handler := limiterEmPanico(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	s.Require().NotPanics(func() { s.serve(handler) })
 
 	// É por isso que o Recover é o middleware mais externo.
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, esperado %d", rec.Code, http.StatusInternalServerError)
-	}
+	s.Equal(http.StatusInternalServerError, s.recorder.Code)
 }
 
-func TestErrAbortHandlerContinuaAbortandoEmSilencio(t *testing.T) {
-	handler := middleware.Recover(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+func (s *RecoverSuite) TestErrAbortHandlerContinuaAbortandoEmSilencio() {
+	abortando := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic(http.ErrAbortHandler)
-	}))
+	})
 
-	defer func() {
-		if recovered := recover(); recovered != http.ErrAbortHandler {
-			t.Fatalf("panic propagado = %v, esperado http.ErrAbortHandler", recovered)
-		}
-	}()
-
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
-	t.Fatal("ErrAbortHandler foi engolido pelo Recover")
+	// O net/http trata este panic como pedido explícito de abandonar a resposta;
+	// engoli-lo aqui viraria um 500 e um log de erro que ninguém pediu.
+	s.PanicsWithValue(http.ErrAbortHandler, func() { s.serve(abortando) })
 }

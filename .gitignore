@@ -1,2 +1,4 @@
-.env
+# O .env da raiz é o de quem roda o binário fora do Docker — pode ter valor
+# local. O de deployments/ é versionado: veja o cabeçalho dele.
+/.env
 /server

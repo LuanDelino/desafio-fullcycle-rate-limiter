@@ -5,15 +5,16 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/suite"
 
 	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter"
 	"github.com/luanperes/fullcycle-rate-limiter/internal/middleware"
 )
 
-// checkerFake registra o que o middleware extraiu da requisição e devolve
-// o veredito combinado pelo teste.
+// checkerFake registra o que o middleware extraiu da requisição e devolve o
+// veredito combinado pelo teste.
 type checkerFake struct {
 	result limiter.Result
 	err    error
@@ -33,87 +34,82 @@ func (checkerEmPanico) Allow(context.Context, string, string) (limiter.Result, e
 	panic("limiter quebrou")
 }
 
-func serve(t *testing.T, checker middleware.Checker, req *http.Request) (*httptest.ResponseRecorder, bool) {
-	t.Helper()
+type RateLimitSuite struct {
+	suite.Suite
+	checker  *checkerFake
+	chegou   bool
+	recorder *httptest.ResponseRecorder
+}
 
-	chegou := false
+func TestRateLimitSuite(t *testing.T) {
+	suite.Run(t, new(RateLimitSuite))
+}
+
+func (s *RateLimitSuite) SetupTest() {
+	s.checker = &checkerFake{}
+	s.chegou = false
+	s.recorder = httptest.NewRecorder()
+}
+
+// serve roda a requisição pelo middleware e registra se ela chegou ao handler.
+func (s *RateLimitSuite) serve(req *http.Request) {
+	s.T().Helper()
+
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		chegou = true
+		s.chegou = true
 		w.WriteHeader(http.StatusOK)
 	})
 
-	rec := httptest.NewRecorder()
-	middleware.RateLimit(checker)(next).ServeHTTP(rec, req)
-	return rec, chegou
+	middleware.RateLimit(s.checker)(next).ServeHTTP(s.recorder, req)
 }
 
-func TestRequisicaoPermitidaChegaNoHandler(t *testing.T) {
-	checker := &checkerFake{result: limiter.Result{Allowed: true}}
+func (s *RateLimitSuite) TestRequisicaoPermitidaChegaNoHandler() {
+	s.checker.result = limiter.Result{Allowed: true}
 
-	rec, chegou := serve(t, checker, httptest.NewRequest(http.MethodGet, "/", nil))
+	s.serve(httptest.NewRequest(http.MethodGet, "/", nil))
 
-	if !chegou {
-		t.Fatal("requisição permitida não chegou ao handler seguinte")
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, esperado %d", rec.Code, http.StatusOK)
-	}
+	s.True(s.chegou, "requisição permitida não chegou ao handler seguinte")
+	s.Equal(http.StatusOK, s.recorder.Code)
 }
 
-func TestRequisicaoBloqueadaResponde429ComAMensagemDoDesafio(t *testing.T) {
-	checker := &checkerFake{result: limiter.Result{Allowed: false}}
+func (s *RateLimitSuite) TestRequisicaoBloqueadaResponde429ComAMensagemDoDesafio() {
+	s.checker.result = limiter.Result{Allowed: false}
 
-	rec, chegou := serve(t, checker, httptest.NewRequest(http.MethodGet, "/", nil))
+	s.serve(httptest.NewRequest(http.MethodGet, "/", nil))
 
-	if chegou {
-		t.Fatal("requisição bloqueada chegou ao handler seguinte")
-	}
-	if rec.Code != http.StatusTooManyRequests {
-		t.Errorf("status = %d, esperado %d", rec.Code, http.StatusTooManyRequests)
-	}
-	if got := rec.Body.String(); got != middleware.BlockedMessage {
-		t.Errorf("corpo = %q, esperado exatamente %q", got, middleware.BlockedMessage)
-	}
+	s.False(s.chegou, "requisição bloqueada chegou ao handler seguinte")
+	s.Equal(http.StatusTooManyRequests, s.recorder.Code)
+	s.Equal(middleware.BlockedMessage, s.recorder.Body.String(), "o corpo do 429 é exigido literalmente pelo desafio")
 }
 
-func TestTokenEhLidoDoHeaderAPIKey(t *testing.T) {
-	checker := &checkerFake{result: limiter.Result{Allowed: true}}
+func (s *RateLimitSuite) TestTokenEhLidoDoHeaderAPIKey() {
+	s.checker.result = limiter.Result{Allowed: true}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("API_KEY", "abc123")
-	serve(t, checker, req)
+	s.serve(req)
 
-	if checker.gotTok != "abc123" {
-		t.Errorf("token lido = %q, esperado %q", checker.gotTok, "abc123")
-	}
+	s.Equal("abc123", s.checker.gotTok)
 }
 
-func TestIPEhExtraidoSemAPortaDeOrigem(t *testing.T) {
-	checker := &checkerFake{result: limiter.Result{Allowed: true}}
+func (s *RateLimitSuite) TestIPEhExtraidoSemAPortaDeOrigem() {
+	s.checker.result = limiter.Result{Allowed: true}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.0.7:54321"
-	serve(t, checker, req)
+	s.serve(req)
 
 	// A porta muda a cada conexão: mantê-la daria um contador novo por
 	// requisição e o limite por IP nunca fecharia.
-	if checker.gotIP != "192.168.0.7" {
-		t.Errorf("IP extraído = %q, esperado %q", checker.gotIP, "192.168.0.7")
-	}
+	s.Equal("192.168.0.7", s.checker.gotIP)
 }
 
-func TestFalhaDoLimiterResponde500ENaoAMensagemDeLimite(t *testing.T) {
-	checker := &checkerFake{err: errors.New("redis fora do ar")}
+func (s *RateLimitSuite) TestFalhaDoLimiterResponde500ENaoAMensagemDeLimite() {
+	s.checker.err = errors.New("redis fora do ar")
 
-	rec, chegou := serve(t, checker, httptest.NewRequest(http.MethodGet, "/", nil))
+	s.serve(httptest.NewRequest(http.MethodGet, "/", nil))
 
-	if chegou {
-		t.Fatal("falha do limiter deixou a requisição passar")
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, esperado %d", rec.Code, http.StatusInternalServerError)
-	}
-	if strings.Contains(rec.Body.String(), middleware.BlockedMessage) {
-		t.Error("falha de infraestrutura foi reportada como limite excedido")
-	}
+	s.False(s.chegou, "falha do limiter deixou a requisição passar")
+	s.Equal(http.StatusInternalServerError, s.recorder.Code)
+	s.NotContains(s.recorder.Body.String(), middleware.BlockedMessage, "falha de infraestrutura foi reportada como limite excedido")
 }

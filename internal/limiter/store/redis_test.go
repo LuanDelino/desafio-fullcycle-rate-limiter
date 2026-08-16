@@ -7,166 +7,158 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter/store"
 )
 
-// newRedis abre um store contra um Redis de verdade. O teste em memória prova
-// a regra; este prova o contrato com o Redis (TTL da janela, TTL do bloqueio),
+// RedisSuite roda contra um Redis de verdade. O store em memória prova a regra;
+// esta suíte prova o contrato com o Redis — tempo de vida das chaves e reparo —,
 // que nenhum fake consegue provar.
-func newRedis(t *testing.T) *store.Redis {
-	t.Helper()
-
-	addr := os.Getenv("REDIS_TEST_ADDR")
-	if addr == "" {
-		t.Skip("REDIS_TEST_ADDR não definido; pulando teste de integração")
-	}
-
-	ctx := context.Background()
-	redisStore, err := store.NewRedis(ctx, store.Options{Addr: addr})
-	if err != nil {
-		t.Fatalf("conectar no redis: %v", err)
-	}
-	t.Cleanup(func() { _ = redisStore.Close() })
-
-	return redisStore
+type RedisSuite struct {
+	suite.Suite
+	store  *store.Redis
+	client *redis.Client
+	ctx    context.Context
 }
 
-func newClient(t *testing.T) *redis.Client {
-	t.Helper()
-
-	addr := os.Getenv("REDIS_TEST_ADDR")
-	if addr == "" {
-		t.Skip("REDIS_TEST_ADDR não definido; pulando teste de integração")
-	}
-
-	client := redis.NewClient(&redis.Options{Addr: addr})
-	t.Cleanup(func() { _ = client.Close() })
-
-	return client
+func TestRedisSuite(t *testing.T) {
+	suite.Run(t, new(RedisSuite))
 }
 
-func countKeyDe(key string) string { return "ratelimit:count:" + key }
-
-// ttlDe lê o tempo de vida restante de uma chave; negativo significa eterna.
-func ttlDe(t *testing.T, key string) time.Duration {
-	t.Helper()
-
-	ttl, err := newClient(t).PTTL(context.Background(), key).Result()
-	if err != nil {
-		t.Fatalf("PTTL de %q: %v", key, err)
+func (s *RedisSuite) SetupSuite() {
+	addr := os.Getenv("REDIS_TEST_ADDR")
+	if addr == "" {
+		s.T().Skip("REDIS_TEST_ADDR não definido; pulando testes de integração")
 	}
+
+	s.ctx = context.Background()
+
+	redisStore, err := store.NewRedis(s.ctx, store.Options{Addr: addr})
+	s.Require().NoError(err, "conectar no redis em %s", addr)
+	s.store = redisStore
+
+	// Client cru para inspecionar e manipular as chaves pelas costas do store —
+	// é o que permite provar o TTL de verdade.
+	s.client = redis.NewClient(&redis.Options{Addr: addr})
+}
+
+func (s *RedisSuite) TearDownSuite() {
+	if s.store != nil {
+		s.NoError(s.store.Close())
+	}
+	if s.client != nil {
+		s.NoError(s.client.Close())
+	}
+}
+
+// SetupTest limpa as chaves do teste anterior para que a ordem de execução não
+// influencie o resultado.
+func (s *RedisSuite) SetupTest() {
+	s.Require().NoError(s.client.FlushDB(s.ctx).Err())
+}
+
+// chave devolve um nome de chave isolado por teste.
+func (s *RedisSuite) chave() string {
+	return "teste:" + s.T().Name()
+}
+
+// countKey devolve o nome real da chave de contagem no Redis.
+func (s *RedisSuite) countKey() string {
+	return "ratelimit:count:" + s.chave()
+}
+
+// ttl lê o tempo de vida restante; negativo significa chave sem expiração.
+func (s *RedisSuite) ttl(key string) time.Duration {
+	s.T().Helper()
+
+	ttl, err := s.client.PTTL(s.ctx, key).Result()
+	s.Require().NoErrorf(err, "PTTL de %q", key)
+
 	return ttl
 }
 
-func TestRedisIncrementCriaJanelaEExpiraSozinho(t *testing.T) {
-	redisStore := newRedis(t)
-	ctx := context.Background()
-	key := "teste-janela-" + t.Name()
+func (s *RedisSuite) increment(window time.Duration) int64 {
+	s.T().Helper()
+
+	total, err := s.store.Increment(s.ctx, s.chave(), window)
+	s.Require().NoError(err)
+
+	return total
+}
+
+func (s *RedisSuite) TestIncrementContaEReiniciaQuandoAJanelaVence() {
+	const window = 300 * time.Millisecond
 
 	for i := int64(1); i <= 3; i++ {
-		got, err := redisStore.Increment(ctx, key, 300*time.Millisecond)
-		if err != nil {
-			t.Fatalf("Increment: %v", err)
-		}
-		if got != i {
-			t.Fatalf("contador = %d, esperado %d", got, i)
-		}
+		s.Equalf(i, s.increment(window), "total na requisição %d", i)
 	}
 
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(window + 100*time.Millisecond)
 
-	got, err := redisStore.Increment(ctx, key, 300*time.Millisecond)
-	if err != nil {
-		t.Fatalf("Increment depois da janela: %v", err)
-	}
-	if got != 1 {
-		t.Fatalf("contador depois da janela = %d, esperado 1", got)
-	}
+	s.Equal(int64(1), s.increment(window), "contador não reiniciou depois que a janela venceu")
 }
 
-func TestRedisIncrementNaoRenovaAJanelaAcadaRequisicao(t *testing.T) {
-	redisStore := newRedis(t)
-	ctx := context.Background()
-	key := "teste-sem-renovar-" + t.Name()
+func (s *RedisSuite) TestIncrementNaoRenovaAJanelaAcadaRequisicao() {
+	const window = time.Second
 
-	if _, err := redisStore.Increment(ctx, key, time.Second); err != nil {
-		t.Fatalf("Increment: %v", err)
-	}
+	s.increment(window)
 	time.Sleep(400 * time.Millisecond)
-	if _, err := redisStore.Increment(ctx, key, time.Second); err != nil {
-		t.Fatalf("Increment: %v", err)
-	}
+	s.increment(window)
 
-	// O segundo acesso não pode empurrar o vencimento para frente: se
-	// empurrasse, tráfego contínuo manteria a chave viva e o contador nunca
-	// reiniciaria.
-	ttl := ttlDe(t, countKeyDe(key))
-	if ttl > 700*time.Millisecond {
-		t.Fatalf("TTL restante = %v; o segundo acesso renovou a janela", ttl)
-	}
+	// Se o segundo acesso empurrasse o vencimento, tráfego contínuo manteria a
+	// chave viva e o contador nunca reiniciaria.
+	s.Less(s.ttl(s.countKey()), 700*time.Millisecond, "o segundo acesso renovou a janela")
 }
 
-func TestRedisIncrementReparaChaveSemTempoDeVida(t *testing.T) {
-	redisStore := newRedis(t)
-	ctx := context.Background()
-	key := "teste-reparo-" + t.Name()
+func (s *RedisSuite) TestIncrementReparaChaveSemTempoDeVida() {
+	const window = time.Minute
 
-	if _, err := redisStore.Increment(ctx, key, time.Minute); err != nil {
-		t.Fatalf("Increment: %v", err)
-	}
+	s.increment(window)
 
 	// Simula o processo que morreu antes de marcar o TTL: a chave existe e é
 	// eterna. Sem reparo, a identidade ficaria presa nesta janela para sempre.
-	client := newClient(t)
-	if err := client.Persist(ctx, countKeyDe(key)).Err(); err != nil {
-		t.Fatalf("Persist: %v", err)
-	}
-	if ttl := ttlDe(t, countKeyDe(key)); ttl >= 0 {
-		t.Fatalf("preparo do teste falhou: chave ainda tem TTL de %v", ttl)
-	}
+	s.Require().NoError(s.client.Persist(s.ctx, s.countKey()).Err())
+	s.Require().Negative(s.ttl(s.countKey()), "preparo do teste falhou: a chave ainda tem TTL")
 
-	if _, err := redisStore.Increment(ctx, key, time.Minute); err != nil {
-		t.Fatalf("Increment na chave eterna: %v", err)
-	}
+	s.increment(window)
 
-	if ttl := ttlDe(t, countKeyDe(key)); ttl <= 0 {
-		t.Fatalf("chave sem tempo de vida não foi reparada; TTL = %v", ttl)
-	}
+	s.Positive(s.ttl(s.countKey()), "chave sem tempo de vida não foi reparada")
 }
 
-func TestRedisBlockExpiraNoTempoConfigurado(t *testing.T) {
-	redisStore := newRedis(t)
-	ctx := context.Background()
-	key := "teste-bloqueio-" + t.Name()
+func (s *RedisSuite) TestIncrementAceitaJanelaMenorQueUmSegundo() {
+	// EXPIRE trabalha em segundos e arredondaria 300ms para 1s em silêncio;
+	// o store usa PEXPIRE justamente por isso.
+	s.increment(300 * time.Millisecond)
 
-	blocked, err := redisStore.Blocked(ctx, key)
-	if err != nil {
-		t.Fatalf("Blocked: %v", err)
-	}
-	if blocked {
-		t.Fatal("chave nova apareceu como bloqueada")
-	}
+	s.LessOrEqual(s.ttl(s.countKey()), 300*time.Millisecond, "a janela sub-segundo foi arredondada para cima")
+}
 
-	if err := redisStore.Block(ctx, key, 300*time.Millisecond); err != nil {
-		t.Fatalf("Block: %v", err)
-	}
+func (s *RedisSuite) TestBlockExpiraNoTempoConfigurado() {
+	const duration = 300 * time.Millisecond
 
-	blocked, err = redisStore.Blocked(ctx, key)
-	if err != nil {
-		t.Fatalf("Blocked depois de Block: %v", err)
-	}
-	if !blocked {
-		t.Fatal("chave bloqueada não apareceu como bloqueada")
-	}
+	blocked, err := s.store.Blocked(s.ctx, s.chave())
+	s.Require().NoError(err)
+	s.Require().False(blocked, "chave nova apareceu como bloqueada")
 
-	time.Sleep(400 * time.Millisecond)
+	s.Require().NoError(s.store.Block(s.ctx, s.chave(), duration))
 
-	blocked, err = redisStore.Blocked(ctx, key)
-	if err != nil {
-		t.Fatalf("Blocked depois do TTL: %v", err)
-	}
-	if blocked {
-		t.Fatal("bloqueio não expirou no tempo configurado")
-	}
+	blocked, err = s.store.Blocked(s.ctx, s.chave())
+	s.Require().NoError(err)
+	s.True(blocked, "chave bloqueada não apareceu como bloqueada")
+
+	time.Sleep(duration + 100*time.Millisecond)
+
+	blocked, err = s.store.Blocked(s.ctx, s.chave())
+	s.Require().NoError(err)
+	s.False(blocked, "bloqueio não expirou no tempo configurado")
+}
+
+func (s *RedisSuite) TestContadorEBloqueioSaoChavesSeparadas() {
+	s.increment(time.Minute)
+	s.Require().NoError(s.store.Block(s.ctx, s.chave(), time.Hour))
+
+	// TTLs independentes são o que faz o bloqueio sobreviver à virada da janela.
+	s.Positive(s.ttl(s.countKey()))
+	s.Greater(s.ttl("ratelimit:block:"+s.chave()), s.ttl(s.countKey()))
 }
