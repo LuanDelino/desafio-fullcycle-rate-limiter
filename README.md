@@ -26,6 +26,7 @@ curl localhost:8080/
 | `make logs` | Acompanha o log da aplicação |
 | `make test` | Roda a suíte completa no Docker, com Redis de verdade |
 | `make test-unit` | Roda só o que não precisa de Redis, direto na máquina |
+| `make load` | Dispara carga contra o servidor no ar e confere as respostas |
 | `make check` | Formata, analisa e roda a suíte completa |
 | `make help` | Lista os alvos |
 
@@ -61,6 +62,40 @@ for i in $(seq 1 12); do
   curl -s -o /dev/null -w "%{http_code}\n" -H "API_KEY: abc123" localhost:8080/
 done
 ```
+
+## Carga contra o servidor no ar
+
+Com o sistema de pé (`make up`), o `loadcheck` dispara requisições concorrentes
+de fora do processo e **confere** o resultado:
+
+```bash
+make load
+```
+
+Ele roda os três cenários do `.env` — limite por IP, token generoso e token
+restrito — limpando o Redis entre eles:
+
+```
+--- limite por IP: 10/s ---
+→ 50 requisições, 25 simultâneas, sem token (limite por IP)
+  200 aceitas: 10
+  429 recusadas: 40
+  latência: mediana 3.7ms, p95 12.5ms, máxima 12.6ms
+  duração: 13ms (3812 req/s)
+  OK: 10 aceitas e 40 recusadas, como esperado
+```
+
+O que separa isso de um gerador de carga comum é o veredito. Ele compara o número
+de aceitas com o esperado, confere o corpo de **cada** 429 contra o texto exigido
+no desafio, e sai com código 1 quando algo diverge — dá para pendurar em CI. Para
+apontar em outro alvo ou outro limite:
+
+```bash
+go run ./cmd/loadcheck -url http://localhost:8080/ -n 150 -c 50 -token abc123 -esperado 100
+```
+
+Vale a ressalva: a carga sai de uma máquina só, contra uma instância só. Serve
+para verificar a **regra** sob concorrência, não para dimensionar capacidade.
 
 ## Configuração
 
@@ -234,6 +269,7 @@ não necessariamente trocáveis a quente. O que garante a primeira parte é a
 
 ```
 Makefile                atalhos para o compose
+cmd/loadcheck/          carga com veredito contra o servidor no ar
 cmd/server/             servidor HTTP e escolha da estratégia
 deployments/            Dockerfile, compose e .env
 internal/config/        leitura do ambiente (nenhum outro pacote lê env)
