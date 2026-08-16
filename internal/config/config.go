@@ -76,7 +76,6 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// parseTokenLimits lê o formato "token:limite,outro:limite".
 func parseTokenLimits(raw string) (map[string]int64, error) {
 	limits := make(map[string]int64)
 

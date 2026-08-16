@@ -19,10 +19,9 @@ import (
 )
 
 func main() {
-	// Falha de subida é fatal de propósito: config inválida ou store fora do ar
-	// não têm recuperação em runtime, e um processo que sobe assim entraria no
-	// balanceador fingindo saúde. Panic de requisição, esse sim, é recuperado
-	// pelo middleware Recover.
+	// Falha de subida é fatal: um processo que sobe sem config válida ou sem
+	// store entraria no balanceador fingindo saúde. Panic de requisição, esse
+	// sim, é recuperado pelo middleware Recover.
 	if err := run(); err != nil {
 		slog.Error("servidor encerrado com erro", "erro", err)
 		os.Exit(1)
@@ -80,12 +79,6 @@ func run() error {
 	return server.Shutdown(shutdownCtx)
 }
 
-// newHandler monta a cadeia de middlewares sobre as rotas. Recover por fora
-// para cobrir panic do próprio limiter; o limiter por fora do mux para decidir
-// antes de qualquer trabalho de handler.
-//
-// É uma função à parte para o teste de aceitação exercitar a montagem de
-// verdade, e não uma cópia dela que pode divergir com o tempo.
 func newHandler(rateLimiter middleware.Checker) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", hello)
@@ -94,10 +87,8 @@ func newHandler(rateLimiter middleware.Checker) http.Handler {
 	return middleware.Recover(middleware.RateLimit(rateLimiter)(mux))
 }
 
-// buildStore escolhe a estratégia de persistência conforme a configuração.
-// Cada estratégia tem seu case explícito e o default é erro: com o Redis no
-// default, uma estratégia nova aceita pelo config e esquecida aqui viraria Redis
-// em silêncio, e o operador só descobriria pelo comportamento.
+// O default é erro de propósito: com o Redis ali, uma estratégia nova aceita
+// pelo config e esquecida aqui viraria Redis em silêncio.
 func buildStore(ctx context.Context, cfg config.Config) (limiter.Store, func(), error) {
 	switch cfg.Store {
 	case "memory":

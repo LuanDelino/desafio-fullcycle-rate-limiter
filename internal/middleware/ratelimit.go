@@ -16,8 +16,6 @@ const TokenHeader = "API_KEY"
 // BlockedMessage é o corpo exigido literalmente pelo desafio na resposta 429.
 const BlockedMessage = "you have reached the maximum number of requests or actions allowed within a certain time frame"
 
-// Checker é o que o middleware precisa do limiter, declarado aqui no consumidor
-// para o middleware poder ser testado com um duplo.
 type Checker interface {
 	Allow(ctx context.Context, ip, token string) (limiter.Result, error)
 }

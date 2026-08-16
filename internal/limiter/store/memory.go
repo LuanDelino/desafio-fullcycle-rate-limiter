@@ -58,8 +58,6 @@ func (m *Memory) Increment(_ context.Context, key string, window time.Duration) 
 	return c.value, nil
 }
 
-// registrarEscrita conta a operação e varre os vencidos de tempos em tempos.
-// Precisa ser chamada com o lock tomado.
 func (m *Memory) registrarEscrita(now time.Time) {
 	m.escritas++
 	if m.escritas < limpezaACada {

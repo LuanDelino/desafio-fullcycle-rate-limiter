@@ -34,8 +34,6 @@ func (s *LimiterSuite) limiterCom(cfg limiter.Config) *limiter.Limiter {
 	return limiter.New(store.NewMemoryWithClock(s.clock.Now), cfg)
 }
 
-// allow falha o teste na hora se o store devolver erro: nenhuma asserção sobre
-// o veredito faz sentido depois disso.
 func (s *LimiterSuite) allow(l *limiter.Limiter, ip, token string) limiter.Result {
 	s.T().Helper()
 
@@ -169,8 +167,6 @@ func (s *LimiterSuite) TestRemainingDecrescePorRequisicao() {
 	}
 }
 
-// storeQuebrado devolve erro em toda consulta, para provar que a falha de
-// persistência sobe como erro em vez de virar liberação silenciosa.
 type storeQuebrado struct{}
 
 func (storeQuebrado) Increment(context.Context, string, time.Duration) (int64, error) {

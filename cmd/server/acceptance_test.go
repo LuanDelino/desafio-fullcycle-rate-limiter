@@ -17,10 +17,8 @@ import (
 	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/limiter/store"
 )
 
-// AceitacaoSuite exercita o sistema inteiro como o avaliador vai exercitar:
-// servidor HTTP de verdade, Redis de verdade, e a mesma montagem de middlewares
-// que o main usa. As outras suítes provam as peças; esta prova o que o
-// docs/desafio.md pede.
+// AceitacaoSuite prova o que o docs/desafio.md pede, pela mesma montagem de
+// middlewares que o main usa. As outras suítes provam as peças.
 type AceitacaoSuite struct {
 	suite.Suite
 	servidor *httptest.Server
@@ -29,10 +27,9 @@ type AceitacaoSuite struct {
 }
 
 const (
-	// Janela folgada nos testes de contagem: com 1s, uma execução que cruzasse a
-	// virada do segundo reiniciaria o contador no meio do teste. O bloqueio é
-	// maior que a janela, como em produção — bloqueio mais curto que a janela
-	// expiraria antes dela e não teria efeito nenhum.
+	// Janela folgada: com 1s, uma execução que cruzasse a virada do segundo
+	// reiniciaria o contador no meio do teste. O bloqueio é maior que a janela,
+	// como em produção.
 	janelaDeTeste  = 3 * time.Second
 	bloqueioDeTest = 10 * time.Second
 
@@ -83,13 +80,10 @@ func (s *AceitacaoSuite) TearDownSuite() {
 	}
 }
 
-// SetupTest zera o Redis porque todas as requisições saem do mesmo IP local: sem
-// isso o contador de um teste condenaria o seguinte.
 func (s *AceitacaoSuite) SetupTest() {
 	s.Require().NoError(s.client.FlushDB(s.ctx).Err())
 }
 
-// chamar faz uma requisição de verdade e devolve status e corpo.
 func (s *AceitacaoSuite) chamar(token string) (int, string) {
 	s.T().Helper()
 
@@ -109,7 +103,6 @@ func (s *AceitacaoSuite) chamar(token string) (int, string) {
 	return resp.StatusCode, string(corpo)
 }
 
-// chamarVezes devolve quantas requisições foram aceitas em n tentativas.
 func (s *AceitacaoSuite) chamarVezes(n int, token string) (aceitas int) {
 	s.T().Helper()
 
@@ -121,7 +114,6 @@ func (s *AceitacaoSuite) chamarVezes(n int, token string) (aceitas int) {
 	return aceitas
 }
 
-// chaves lista as chaves que o limiter criou no Redis.
 func (s *AceitacaoSuite) chaves(padrao string) []string {
 	s.T().Helper()
 
@@ -131,7 +123,6 @@ func (s *AceitacaoSuite) chaves(padrao string) []string {
 	return encontradas
 }
 
-// 1. Acesso ao Redis — sem ele o sistema não atende.
 func (s *AceitacaoSuite) TestSistemaAtendeComORedisAcessivel() {
 	s.Require().NoError(s.client.Ping(s.ctx).Err(), "o Redis do teste não respondeu")
 
@@ -141,12 +132,10 @@ func (s *AceitacaoSuite) TestSistemaAtendeComORedisAcessivel() {
 	s.Equal("ok", corpo)
 }
 
-// 2. Quantidade de chamados — o limite é exato, não aproximado.
 func (s *AceitacaoSuite) TestPassamExatamenteAsRequisicoesDoLimiteDoIP() {
 	s.Equal(limitePorIP, s.chamarVezes(limitePorIP+5, ""), "o número de requisições aceitas não bateu com o limite do IP")
 }
 
-// 3. Erro pedido no docs — o status.
 func (s *AceitacaoSuite) TestRequisicaoAcimaDoLimiteResponde429() {
 	s.Require().Equal(limitePorIP, s.chamarVezes(limitePorIP, ""))
 
@@ -155,7 +144,6 @@ func (s *AceitacaoSuite) TestRequisicaoAcimaDoLimiteResponde429() {
 	s.Equal(http.StatusTooManyRequests, status)
 }
 
-// 4. Erro pedido no docs — o corpo, literal.
 func (s *AceitacaoSuite) TestRequisicaoAcimaDoLimiteRespondeAMensagemExigida() {
 	s.Require().Equal(limitePorIP, s.chamarVezes(limitePorIP, ""))
 
@@ -164,7 +152,6 @@ func (s *AceitacaoSuite) TestRequisicaoAcimaDoLimiteRespondeAMensagemExigida() {
 	s.Equal(mensagemDoDesafio, corpo, "o corpo do 429 é exigido literalmente pelo desafio")
 }
 
-// 5. Acesso ao Redis — a contagem realmente mora lá, com o tempo de vida da janela.
 func (s *AceitacaoSuite) TestContagemEhGravadaNoRedisComOTempoDeVidaDaJanela() {
 	s.chamar("")
 
@@ -181,7 +168,6 @@ func (s *AceitacaoSuite) TestContagemEhGravadaNoRedisComOTempoDeVidaDaJanela() {
 	s.LessOrEqual(ttl, janelaDeTeste)
 }
 
-// 6. Acesso ao Redis — o bloqueio é outra chave, com o tempo de vida da punição.
 func (s *AceitacaoSuite) TestBloqueioEhGravadoNoRedisComOTempoDeVidaDaPunicao() {
 	s.chamarVezes(limitePorIP+1, "")
 
@@ -194,7 +180,6 @@ func (s *AceitacaoSuite) TestBloqueioEhGravadoNoRedisComOTempoDeVidaDaPunicao() 
 	s.LessOrEqual(ttl, bloqueioDeTest)
 }
 
-// 7. Quantidade de chamados — a regra de ouro do desafio: o token sobrepõe o IP.
 func (s *AceitacaoSuite) TestTokenComLimiteMaiorSobrepoeOLimiteDoIP() {
 	aceitas := s.chamarVezes(limiteGeneroso, tokenGeneroso)
 
@@ -202,7 +187,6 @@ func (s *AceitacaoSuite) TestTokenComLimiteMaiorSobrepoeOLimiteDoIP() {
 	s.Empty(s.chaves("ratelimit:count:ip:*"), "com token cadastrado, o contador do IP não deve nem existir")
 }
 
-// 8. Quantidade de chamados — a precedência aperta tanto quanto afrouxa.
 func (s *AceitacaoSuite) TestTokenComLimiteMenorTambemValeSobreOIP() {
 	s.Equal(limiteRestrito, s.chamarVezes(limitePorIP, tokenRestrito))
 
@@ -211,10 +195,8 @@ func (s *AceitacaoSuite) TestTokenComLimiteMenorTambemValeSobreOIP() {
 	s.Equal(mensagemDoDesafio, corpo)
 }
 
-// 9a. A regra de ouro do desafio no caso que mais dói: o IP já estourou e está
-// cumprindo bloqueio, e mesmo assim o token continua até o limite dele. Se a
-// precedência fosse consultada depois do bloqueio, e não antes, o token herdaria
-// a punição do IP e o limite maior não valeria de nada.
+// Se a precedência fosse consultada depois do bloqueio, e não antes, o token
+// herdaria a punição do IP e o limite maior não valeria de nada.
 func (s *AceitacaoSuite) TestTokenContinuaAteOLimiteDeleComOIPJaBloqueado() {
 	s.Require().Equal(limitePorIP, s.chamarVezes(limitePorIP+1, ""), "preparo: o IP precisa estourar")
 	s.Require().Len(s.chaves("ratelimit:block:ip:*"), 1, "preparo: o IP precisa estar bloqueado")
@@ -224,7 +206,6 @@ func (s *AceitacaoSuite) TestTokenContinuaAteOLimiteDeleComOIPJaBloqueado() {
 	s.Equal(limiteGeneroso, aceitas, "o token parou antes do limite dele por causa do bloqueio do IP")
 }
 
-// 9b. A independência vale nos dois sentidos: token punido não contamina o IP.
 func (s *AceitacaoSuite) TestIPContinuaAtendendoComUmTokenJaBloqueado() {
 	s.Require().Equal(limiteRestrito, s.chamarVezes(limiteRestrito+1, tokenRestrito), "preparo: o token precisa estourar")
 	s.Require().Len(s.chaves("ratelimit:block:token:*"), 1, "preparo: o token precisa estar bloqueado")
@@ -234,7 +215,6 @@ func (s *AceitacaoSuite) TestIPContinuaAtendendoComUmTokenJaBloqueado() {
 	s.Equal(limitePorIP, s.chamarVezes(limitePorIP, ""), "o bloqueio do token vazou para o IP")
 }
 
-// 9c. Identidades distintas não se contaminam.
 func (s *AceitacaoSuite) TestUmTokenBloqueadoNaoDerrubaOutroToken() {
 	s.chamarVezes(limiteRestrito+1, tokenRestrito)
 	s.Require().Len(s.chaves("ratelimit:block:token:*"), 1)
@@ -244,8 +224,6 @@ func (s *AceitacaoSuite) TestUmTokenBloqueadoNaoDerrubaOutroToken() {
 	s.Equal(http.StatusOK, status, "o bloqueio de um token vazou para outro")
 }
 
-// 10. Quantidade de chamados sob concorrência — é o cenário real, e é onde uma
-// contagem não atômica deixaria passar mais que o limite.
 func (s *AceitacaoSuite) TestRequisicoesConcorrentesNaoPassamDoLimite() {
 	const simultaneas = 60
 

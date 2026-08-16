@@ -62,8 +62,6 @@ func identidade(token string) string {
 	return "token " + token
 }
 
-// disparar solta as requisições com todas as goroutines partindo juntas, para a
-// concorrência ser real e não uma fila disfarçada.
 func disparar(url, token string, total, simultaneas int) ([]resultado, time.Duration) {
 	var (
 		grupo       sync.WaitGroup
@@ -206,7 +204,6 @@ func conferir(resultados []resultado, esperado, total int) []string {
 	return dedup(problemas)
 }
 
-// dedup evita repetir a mesma queixa uma vez por requisição.
 func dedup(problemas []string) []string {
 	vistos := make(map[string]bool, len(problemas))
 	unicos := problemas[:0]

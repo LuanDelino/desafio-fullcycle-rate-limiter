@@ -43,6 +43,9 @@ func (r *Redis) Close() error {
 	return r.client.Close()
 }
 
+// O TTL é marcado só quando falta: marcá-lo a cada requisição renovaria a janela
+// e o contador nunca reiniciaria. TTL negativo também pega a chave órfã de um
+// processo que morreu antes de marcá-la, e a requisição seguinte a repara.
 // PEXPIRE, e não EXPIRE, porque a janela pode ser menor que um segundo.
 func (r *Redis) Increment(ctx context.Context, key string, window time.Duration) (int64, error) {
 	countKey := countPrefix + key

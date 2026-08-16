@@ -51,7 +51,6 @@ func (s *ContratoSuite) SetupTest() {
 	s.loja = s.novo()
 }
 
-// chave isola cada teste, inclusive entre execuções contra o mesmo Redis.
 func (s *ContratoSuite) chave() string {
 	return "contrato:" + s.T().Name()
 }

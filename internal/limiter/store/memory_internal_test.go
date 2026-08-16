@@ -9,13 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMemoryNaoCresceSemTetoComIdentidadesQueNaoVoltam olha o mapa por dentro
-// porque o vazamento não aparece em nenhuma asserção de comportamento: as
-// respostas continuam certas enquanto a memória cresce.
-//
-// A promessa aqui é teto, não limpeza imediata: a varredura é amortizada, então
-// entradas vencidas sobrevivem até a próxima varredura. É o bastante, porque sem
-// escrita nova também não há pressão de memória.
+// Olha o mapa por dentro porque o vazamento não aparece em asserção de
+// comportamento: as respostas continuam certas enquanto a memória cresce.
+// A promessa é teto, não limpeza imediata — a varredura é amortizada.
 func TestMemoryNaoCresceSemTetoComIdentidadesQueNaoVoltam(t *testing.T) {
 	agora := time.Now()
 	m := NewMemoryWithClock(func() time.Time { return agora })
