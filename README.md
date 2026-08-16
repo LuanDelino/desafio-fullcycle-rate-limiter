@@ -209,6 +209,27 @@ Ambas são declaradas no **consumidor**, não junto de quem as implementa: é o
 `limiter` que diz do que precisa de um store, e o `middleware` que diz do que
 precisa do limiter.
 
+### Duas diferenças em relação ao Strategy canônico
+
+O [exemplo de Strategy em Go do refactoring.guru](https://refactoring.guru/design-patterns/strategy/go/example)
+declara a interface junto das implementações e expõe um `setEvictionAlgo` para
+trocar a estratégia em runtime. Aqui os dois pontos são diferentes, de propósito:
+
+**A interface fica no consumidor.** Em Go, quem depende declara o que precisa —
+o produtor não impõe a abstração. É o que permite o `middleware` depender de
+`Checker`, com um método, sem arrastar os três do `Store` junto.
+
+**Não há troca em runtime.** No exemplo, a estratégia é o algoritmo de despejo:
+não guarda estado, então trocar no meio da execução é inofensivo. Aqui a
+estratégia **é o estado** — contadores e bloqueios vivem dentro dela. Um setter
+que trocasse Redis por memória em produção descartaria todo bloqueio ativo e
+soltaria na hora quem estava punido. A escolha acontece uma vez, na composição
+(`buildStore`), e não se mexe depois.
+
+Essa é a régua para julgar o padrão: Strategy pede estratégias intercambiáveis,
+não necessariamente trocáveis a quente. O que garante a primeira parte é a
+`ContratoSuite`, que roda as mesmas asserções contra Redis e memória.
+
 ## Estrutura
 
 ```
