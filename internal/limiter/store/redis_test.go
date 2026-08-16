@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter/store"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/limiter/store"
 )
 
 // RedisSuite roda contra um Redis de verdade. O store em memória prova a regra;
@@ -38,8 +38,6 @@ func (s *RedisSuite) SetupSuite() {
 	s.Require().NoError(err, "conectar no redis em %s", addr)
 	s.store = redisStore
 
-	// Client cru para inspecionar e manipular as chaves pelas costas do store —
-	// é o que permite provar o TTL de verdade.
 	s.client = redis.NewClient(&redis.Options{Addr: addr})
 }
 
@@ -52,23 +50,18 @@ func (s *RedisSuite) TearDownSuite() {
 	}
 }
 
-// SetupTest limpa as chaves do teste anterior para que a ordem de execução não
-// influencie o resultado.
 func (s *RedisSuite) SetupTest() {
 	s.Require().NoError(s.client.FlushDB(s.ctx).Err())
 }
 
-// chave devolve um nome de chave isolado por teste.
 func (s *RedisSuite) chave() string {
 	return "teste:" + s.T().Name()
 }
 
-// countKey devolve o nome real da chave de contagem no Redis.
 func (s *RedisSuite) countKey() string {
 	return "ratelimit:count:" + s.chave()
 }
 
-// ttl lê o tempo de vida restante; negativo significa chave sem expiração.
 func (s *RedisSuite) ttl(key string) time.Duration {
 	s.T().Helper()
 

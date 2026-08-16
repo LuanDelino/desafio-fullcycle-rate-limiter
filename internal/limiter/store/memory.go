@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// Memory guarda contadores e bloqueios em memória do processo. Serve para teste
-// e para rodar sem Redis; não sobrevive a reinício nem vale para mais de uma
-// instância da aplicação.
+// Memory serve para teste e para rodar sem Redis. Não sobrevive a reinício nem
+// vale para mais de uma instância da aplicação.
 type Memory struct {
 	mu       sync.Mutex
 	counters map[string]*counter
@@ -22,13 +21,12 @@ type counter struct {
 	expiresAt time.Time
 }
 
-// NewMemory devolve um store em memória usando o relógio do sistema.
 func NewMemory() *Memory {
 	return NewMemoryWithClock(time.Now)
 }
 
-// NewMemoryWithClock devolve um store em memória com relógio injetável, o que
-// permite testar janela e bloqueio sem esperar tempo real.
+// NewMemoryWithClock injeta o relógio, o que permite testar janela e bloqueio
+// sem esperar tempo real.
 func NewMemoryWithClock(now func() time.Time) *Memory {
 	return &Memory{
 		counters: make(map[string]*counter),

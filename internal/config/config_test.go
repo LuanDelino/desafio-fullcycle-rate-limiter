@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/luanperes/fullcycle-rate-limiter/internal/config"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/config"
 )
 
 type ConfigSuite struct {
@@ -17,8 +17,6 @@ func TestConfigSuite(t *testing.T) {
 	suite.Run(t, new(ConfigSuite))
 }
 
-// SetupTest zera as variáveis que a suíte manipula. t.Setenv restaura o valor
-// anterior ao fim de cada teste, então um teste não vaza ambiente no seguinte.
 func (s *ConfigSuite) SetupTest() {
 	for _, nome := range []string{
 		"WEB_SERVER_PORT", "RATE_LIMIT_STORE", "REDIS_ADDR", "REDIS_PASSWORD",

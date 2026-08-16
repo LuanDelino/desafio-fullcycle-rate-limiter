@@ -1,4 +1,4 @@
-module github.com/luanperes/fullcycle-rate-limiter
+module github.com/LuanDelino/desafio-fullcycle-rate-limiter
 
 go 1.26.4
 

@@ -8,12 +8,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter"
-	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter/store"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/limiter"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/limiter/store"
 )
 
-// clock é um relógio controlado pelo teste: janela e bloqueio são verificados
-// avançando o tempo, sem espera real.
 type clock struct{ now time.Time }
 
 func (c *clock) Now() time.Time          { return c.now }
@@ -32,7 +30,6 @@ func (s *LimiterSuite) SetupTest() {
 	s.clock = &clock{now: time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)}
 }
 
-// limiterCom monta um limiter apoiado no relógio da suíte.
 func (s *LimiterSuite) limiterCom(cfg limiter.Config) *limiter.Limiter {
 	return limiter.New(store.NewMemoryWithClock(s.clock.Now), cfg)
 }
@@ -82,7 +79,6 @@ func (s *LimiterSuite) TestLimiteDoTokenSeSobrepoeAoDoIP() {
 		BlockDuration: 5 * time.Minute,
 	})
 
-	// O mesmo IP passa das 2 do limite de IP porque o token cadastrado vale 5.
 	for i := 1; i <= 5; i++ {
 		s.Truef(s.allow(l, "10.0.0.1", "abc123").Allowed, "requisição %d do token foi rejeitada antes do limite dele", i)
 	}

@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/luanperes/fullcycle-rate-limiter/internal/config"
-	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter"
-	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter/store"
-	"github.com/luanperes/fullcycle-rate-limiter/internal/middleware"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/config"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/limiter"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/limiter/store"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/middleware"
 )
 
 func main() {

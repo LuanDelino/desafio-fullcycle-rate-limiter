@@ -9,12 +9,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/luanperes/fullcycle-rate-limiter/internal/limiter"
-	"github.com/luanperes/fullcycle-rate-limiter/internal/middleware"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/limiter"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/middleware"
 )
 
-// checkerFake registra o que o middleware extraiu da requisição e devolve o
-// veredito combinado pelo teste.
 type checkerFake struct {
 	result limiter.Result
 	err    error
@@ -27,7 +25,6 @@ func (c *checkerFake) Allow(_ context.Context, ip, token string) (limiter.Result
 	return c.result, c.err
 }
 
-// checkerEmPanico simula o limiter estourando em runtime.
 type checkerEmPanico struct{}
 
 func (checkerEmPanico) Allow(context.Context, string, string) (limiter.Result, error) {
@@ -51,7 +48,6 @@ func (s *RateLimitSuite) SetupTest() {
 	s.recorder = httptest.NewRecorder()
 }
 
-// serve roda a requisição pelo middleware e registra se ela chegou ao handler.
 func (s *RateLimitSuite) serve(req *http.Request) {
 	s.T().Helper()
 

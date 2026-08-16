@@ -12,29 +12,24 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Config é o conjunto completo de definições da aplicação.
 type Config struct {
-	// ServerPort é a porta HTTP do servidor.
 	ServerPort string
 	// Store escolhe a estratégia de persistência: "redis" ou "memory".
-	Store string
-	// RedisAddr, RedisPassword e RedisDB configuram a conexão com o Redis.
+	Store         string
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
-	// IPLimit é o máximo de requisições por janela para um mesmo IP.
-	IPLimit int64
-	// TokenLimits mapeia token -> máximo de requisições por janela.
-	TokenLimits map[string]int64
-	// Window é o tamanho da janela de contagem.
-	Window time.Duration
-	// BlockDuration é o tempo de bloqueio de quem estourou o limite.
+	// IPLimit e TokenLimits são máximos por janela, não por segundo: quem define
+	// o "por segundo" é Window.
+	IPLimit       int64
+	TokenLimits   map[string]int64
+	Window        time.Duration
 	BlockDuration time.Duration
 }
 
 // Load lê o .env da raiz, se existir, e monta a configuração a partir do
-// ambiente. Ausência do arquivo não é erro: em container as variáveis vêm
-// do próprio ambiente.
+// ambiente. Ausência do arquivo não é erro: em container as variáveis vêm do
+// próprio ambiente.
 func Load() (Config, error) {
 	_ = godotenv.Load()
 

@@ -7,10 +7,10 @@ de acesso e persistência no Redis. O enunciado do desafio está em
 ## Como rodar
 
 Tudo que é infraestrutura — Dockerfile, compose e `.env` — vive em
-[`deployments/`](deployments). Da raiz do repositório:
+[`deployments/`](deployments), e os comandos do dia a dia estão no `Makefile`:
 
 ```bash
-docker compose -f deployments/docker-compose.yml up -d --build
+make up
 ```
 
 Sobe o Redis e a aplicação na porta 8080. Para conferir:
@@ -19,18 +19,26 @@ Sobe o Redis e a aplicação na porta 8080. Para conferir:
 curl localhost:8080/
 ```
 
-Para derrubar:
+| Alvo | O que faz |
+|---|---|
+| `make up` | Sobe Redis e aplicação na porta 8080 |
+| `make down` | Derruba tudo e apaga os dados do Redis |
+| `make logs` | Acompanha o log da aplicação |
+| `make test` | Roda a suíte completa no Docker, com Redis de verdade |
+| `make test-unit` | Roda só o que não precisa de Redis, direto na máquina |
+| `make check` | Formata, analisa e roda a suíte completa |
+| `make help` | Lista os alvos |
 
-```bash
-docker compose -f deployments/docker-compose.yml down -v
-```
+O Makefile é conveniência sobre o compose, não uma segunda forma de configurar:
+cada alvo é uma linha de `docker compose -f deployments/docker-compose.yml ...`.
+Quem preferir chamar o compose direto tem o mesmo resultado.
 
 ## Como testar
 
 Toda a suíte, incluindo os testes de integração contra um Redis de verdade:
 
 ```bash
-docker compose -f deployments/docker-compose.yml run --rm test
+make test
 ```
 
 Os testes usam [testify](https://github.com/stretchr/testify), organizados em uma
@@ -182,9 +190,29 @@ Para trocar o Redis por Memcached, Postgres ou o que for:
 Nada no limiter e nada no middleware muda. As duas implementações que já existem
 (`store.Redis` e `store.Memory`) são a prova de que a costura é essa e só essa.
 
+### A régua das interfaces
+
+O projeto tem duas interfaces, e as duas cabem em no máximo três métodos:
+
+| Interface | Onde | Métodos |
+|---|---|---|
+| `limiter.Store` | `internal/limiter` | `Increment`, `Block`, `Blocked` |
+| `middleware.Checker` | `internal/middleware` | `Allow` |
+
+Três é o teto. Interface que cresce além disso deixa de ser um ponto de troca e
+vira o desenho de uma implementação específica — na prática, só o Redis
+conseguiria satisfazê-la, e a Strategy viraria enfeite. Se um dia faltar um
+método aqui, a saída é uma segunda interface pequena para quem precisa dele, não
+um quarto método nesta.
+
+Ambas são declaradas no **consumidor**, não junto de quem as implementa: é o
+`limiter` que diz do que precisa de um store, e o `middleware` que diz do que
+precisa do limiter.
+
 ## Estrutura
 
 ```
+Makefile                atalhos para o compose
 cmd/server/             servidor HTTP e escolha da estratégia
 deployments/            Dockerfile, compose e .env
 internal/config/        leitura do ambiente (nenhum outro pacote lê env)

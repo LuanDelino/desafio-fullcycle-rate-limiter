@@ -8,10 +8,8 @@ import (
 
 // Recover transforma panic de handler em 500 registrado.
 //
-// O net/http já recupera o panic sozinho e mantém o servidor de pé, mas encerra
-// a conexão sem escrever status: o cliente vê a resposta cortada, não um erro. E
-// o stack vai para o log padrão, fora do log estruturado do serviço.
-//
+// O net/http já recupera o panic e mantém o servidor de pé, mas encerra a
+// conexão sem escrever status: o cliente vê a resposta cortada, não um erro.
 // Deve ser o middleware mais externo, para cobrir também o que roda antes do
 // handler — o rate limiter inclusive.
 func Recover(next http.Handler) http.Handler {
@@ -23,7 +21,7 @@ func Recover(next http.Handler) http.Handler {
 			}
 
 			// ErrAbortHandler é o pedido explícito do net/http para abandonar a
-			// resposta em silêncio; tratá-lo como erro poluiria o log.
+			// resposta em silêncio.
 			if panicValue == http.ErrAbortHandler {
 				panic(panicValue)
 			}
@@ -35,8 +33,6 @@ func Recover(next http.Handler) http.Handler {
 				"stack", string(debug.Stack()),
 			)
 
-			// Escrever aqui é inócuo se o handler já respondeu antes do panic:
-			// o net/http descarta o segundo WriteHeader com um aviso no log.
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}()
 

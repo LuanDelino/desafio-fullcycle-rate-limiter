@@ -13,13 +13,12 @@ const (
 	blockPrefix = "ratelimit:block:"
 )
 
-// Redis guarda contadores e bloqueios no Redis, o que faz o limite valer para
-// todas as instâncias da aplicação, e não só para o processo local.
+// Redis faz o limite valer para todas as instâncias da aplicação, e não só para
+// o processo local.
 type Redis struct {
 	client *redis.Client
 }
 
-// Options descreve a conexão com o Redis.
 type Options struct {
 	Addr     string
 	Password string
@@ -46,18 +45,13 @@ func (r *Redis) Close() error {
 
 // Increment soma 1 no contador e devolve o total da janela atual.
 //
-// INCR e PTTL vão na mesma transação, então total e tempo de vida descrevem o
-// mesmo instante da chave. O TTL só é marcado quando não há um: marcá-lo a cada
-// requisição renovaria a janela indefinidamente e, sob tráfego contínuo, o
-// contador nunca reiniciaria.
+// O tempo de vida só é marcado quando a chave não tem um: marcá-lo a cada
+// requisição renovaria a janela e, sob tráfego contínuo, o contador nunca
+// reiniciaria. TTL negativo é chave recém-criada ou órfã de um processo que
+// morreu antes de marcá-la — tratar os dois casos igual é o que faz a requisição
+// seguinte reparar sozinha uma chave que ficou eterna.
 //
-// TTL negativo é chave sem expiração — recém-criada, ou órfã de um processo que
-// morreu antes de marcá-la. Tratar os dois casos igual é o que faz a requisição
-// seguinte reparar sozinha uma chave eterna, que de outro modo prenderia a
-// identidade na primeira janela para sempre.
-//
-// PEXPIRE, e não EXPIRE, porque a janela é configurável e pode ser menor que um
-// segundo — EXPIRE arredondaria para cima em silêncio.
+// PEXPIRE, e não EXPIRE, porque a janela pode ser menor que um segundo.
 func (r *Redis) Increment(ctx context.Context, key string, window time.Duration) (int64, error) {
 	countKey := countPrefix + key
 
@@ -83,7 +77,6 @@ func (r *Redis) Increment(ctx context.Context, key string, window time.Duration)
 	return total.Val(), nil
 }
 
-// Block grava a marca de bloqueio com tempo de vida igual ao da punição.
 func (r *Redis) Block(ctx context.Context, key string, duration time.Duration) error {
 	if err := r.client.Set(ctx, blockPrefix+key, 1, duration).Err(); err != nil {
 		return fmt.Errorf("bloquear %q: %w", key, err)

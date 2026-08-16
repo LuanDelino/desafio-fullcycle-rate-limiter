@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/luanperes/fullcycle-rate-limiter/internal/middleware"
+	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/middleware"
 )
 
 type RecoverSuite struct {
@@ -23,7 +23,6 @@ func (s *RecoverSuite) SetupTest() {
 	s.recorder = httptest.NewRecorder()
 }
 
-// serve roda a requisição pelo Recover envolvendo o handler informado.
 func (s *RecoverSuite) serve(handler http.Handler) {
 	s.T().Helper()
 
@@ -69,7 +68,5 @@ func (s *RecoverSuite) TestErrAbortHandlerContinuaAbortandoEmSilencio() {
 		panic(http.ErrAbortHandler)
 	})
 
-	// O net/http trata este panic como pedido explícito de abandonar a resposta;
-	// engoli-lo aqui viraria um 500 e um log de erro que ninguém pediu.
 	s.PanicsWithValue(http.ErrAbortHandler, func() { s.serve(abortando) })
 }
