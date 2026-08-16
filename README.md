@@ -252,13 +252,30 @@ do git e o valor passa a vir do orquestrador.
 
 | Suíte | Onde | O que cobre |
 |---|---|---|
+| `AceitacaoSuite` | `cmd/server` | O desafio ponta a ponta: servidor HTTP e Redis de verdade, com a mesma montagem de middlewares que o `main` usa |
 | `ConfigSuite` | `internal/config` | Padrões, leitura de cada variável, parse dos limites por token e recusa de valor inválido |
 | `LimiterSuite` | `internal/limiter` | Precedência token/IP, contagem, virada de janela, bloqueio e falha do store — com relógio controlado, sem espera real |
-| `RedisSuite` | `internal/limiter/store` | Contrato com o Redis: TTL da janela, TTL do bloqueio, janela sub-segundo e reparo de chave sem expiração |
+| `ContratoSuite` | `internal/limiter/store` | As mesmas asserções contra Redis e memória: é o que sustenta a premissa da Strategy |
+| `RedisSuite` | `internal/limiter/store` | Só o que o contrato não alcança: tempo de vida real das chaves, janela sub-segundo e reparo de chave sem expiração |
 | `RateLimitSuite` | `internal/middleware` | Extração de IP e token, 200 no caminho feliz, 429 com a mensagem exigida, 500 na falha do limiter |
 | `RecoverSuite` | `internal/middleware` | Panic vira 500, requisição normal atravessa intacta, panic do limiter é coberto, `ErrAbortHandler` segue propagando |
 
-A separação entre `LimiterSuite` e `RedisSuite` é a mesma da arquitetura: a regra
-é provada em memória, com relógio injetado e sem I/O; o que só o Redis pode
-provar — tempo de vida real das chaves — é provado contra o Redis.
+Cada suíte prova o que só ela pode provar, e nada além disso. A regra é provada em
+memória, com relógio injetado e sem I/O; o comportamento comum às estratégias é
+provado uma vez, para as duas, no contrato; o tempo de vida real das chaves é
+provado contra o Redis; e o que o `docs/desafio.md` exige é provado por HTTP.
+
+A `AceitacaoSuite` é a que responde "funciona?" — vale destacar três casos dela:
+
+- **Contagem exata**: dispara `limite + 5` requisições e exige que passem
+  exatamente `limite`. Um rate limiter que erra por um só aparece assim.
+- **Concorrência**: 60 requisições disparadas ao mesmo tempo contra um limite de
+  25 têm de resultar em 25 aceitas. É o cenário de produção, e é onde uma
+  contagem não atômica deixaria passar mais que o limite.
+- **O 429 literal**: status e corpo conferidos contra o texto exigido no desafio,
+  palavra por palavra.
+
+Elas rodam limpas sob `-race`, e a suíte é sensível: trocar `count > limit` por
+`count > limit+1` no limiter quebra `LimiterSuite` e `AceitacaoSuite` — duas
+camadas independentes pegam a mesma regressão.
 

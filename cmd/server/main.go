@@ -51,15 +51,9 @@ func run() error {
 		BlockDuration: cfg.BlockDuration,
 	})
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", hello)
-	mux.HandleFunc("GET /health", health)
-
 	server := &http.Server{
-		Addr: ":" + cfg.ServerPort,
-		// Recover por fora para cobrir panic do próprio limiter; o limiter por
-		// fora do mux para decidir antes de qualquer trabalho de handler.
-		Handler:           middleware.Recover(middleware.RateLimit(rateLimiter)(mux)),
+		Addr:              ":" + cfg.ServerPort,
+		Handler:           newHandler(rateLimiter),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -84,6 +78,20 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return server.Shutdown(shutdownCtx)
+}
+
+// newHandler monta a cadeia de middlewares sobre as rotas. Recover por fora
+// para cobrir panic do próprio limiter; o limiter por fora do mux para decidir
+// antes de qualquer trabalho de handler.
+//
+// É uma função à parte para o teste de aceitação exercitar a montagem de
+// verdade, e não uma cópia dela que pode divergir com o tempo.
+func newHandler(rateLimiter middleware.Checker) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", hello)
+	mux.HandleFunc("GET /health", health)
+
+	return middleware.Recover(middleware.RateLimit(rateLimiter)(mux))
 }
 
 // buildStore escolhe a estratégia de persistência conforme a configuração.

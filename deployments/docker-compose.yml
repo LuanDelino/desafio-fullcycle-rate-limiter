@@ -42,11 +42,17 @@ services:
     working_dir: /src
     volumes:
       - ..:/src
+      # Sem este cache, cada execução rebaixa todos os módulos e enche a saída
+      # do teste com linhas de download.
+      - gomod:/go/pkg/mod
     environment:
       REDIS_TEST_ADDR: redis:6379
-    command: go test ./... -v
+    command: go test ./...
     depends_on:
       redis:
         condition: service_healthy
     profiles:
       - test
+
+volumes:
+  gomod:

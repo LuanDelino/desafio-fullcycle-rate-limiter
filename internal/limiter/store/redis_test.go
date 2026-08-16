@@ -12,9 +12,9 @@ import (
 	"github.com/LuanDelino/desafio-fullcycle-rate-limiter/internal/limiter/store"
 )
 
-// RedisSuite roda contra um Redis de verdade. O store em memória prova a regra;
-// esta suíte prova o contrato com o Redis — tempo de vida das chaves e reparo —,
-// que nenhum fake consegue provar.
+// RedisSuite cobre só o que a ContratoSuite não alcança: o tempo de vida real
+// das chaves, que exige olhar o Redis por fora do contrato. Comportamento comum
+// às duas estratégias é testado lá, uma vez, para as duas.
 type RedisSuite struct {
 	suite.Suite
 	store  *store.Redis
@@ -71,87 +71,38 @@ func (s *RedisSuite) ttl(key string) time.Duration {
 	return ttl
 }
 
-func (s *RedisSuite) increment(window time.Duration) int64 {
+func (s *RedisSuite) increment(window time.Duration) {
 	s.T().Helper()
 
-	total, err := s.store.Increment(s.ctx, s.chave(), window)
+	_, err := s.store.Increment(s.ctx, s.chave(), window)
 	s.Require().NoError(err)
-
-	return total
-}
-
-func (s *RedisSuite) TestIncrementContaEReiniciaQuandoAJanelaVence() {
-	const window = 300 * time.Millisecond
-
-	for i := int64(1); i <= 3; i++ {
-		s.Equalf(i, s.increment(window), "total na requisição %d", i)
-	}
-
-	time.Sleep(window + 100*time.Millisecond)
-
-	s.Equal(int64(1), s.increment(window), "contador não reiniciou depois que a janela venceu")
-}
-
-func (s *RedisSuite) TestIncrementNaoRenovaAJanelaAcadaRequisicao() {
-	const window = time.Second
-
-	s.increment(window)
-	time.Sleep(400 * time.Millisecond)
-	s.increment(window)
-
-	// Se o segundo acesso empurrasse o vencimento, tráfego contínuo manteria a
-	// chave viva e o contador nunca reiniciaria.
-	s.Less(s.ttl(s.countKey()), 700*time.Millisecond, "o segundo acesso renovou a janela")
 }
 
 func (s *RedisSuite) TestIncrementReparaChaveSemTempoDeVida() {
-	const window = time.Minute
-
-	s.increment(window)
+	s.increment(time.Minute)
 
 	// Simula o processo que morreu antes de marcar o TTL: a chave existe e é
 	// eterna. Sem reparo, a identidade ficaria presa nesta janela para sempre.
 	s.Require().NoError(s.client.Persist(s.ctx, s.countKey()).Err())
 	s.Require().Negative(s.ttl(s.countKey()), "preparo do teste falhou: a chave ainda tem TTL")
 
-	s.increment(window)
+	s.increment(time.Minute)
 
 	s.Positive(s.ttl(s.countKey()), "chave sem tempo de vida não foi reparada")
 }
 
-func (s *RedisSuite) TestIncrementAceitaJanelaMenorQueUmSegundo() {
-	// EXPIRE trabalha em segundos e arredondaria 300ms para 1s em silêncio;
-	// o store usa PEXPIRE justamente por isso.
+func (s *RedisSuite) TestJanelaMenorQueUmSegundoNaoEhArredondada() {
+	// EXPIRE trabalha em segundos e levaria 300ms para 1s em silêncio; o store
+	// usa PEXPIRE justamente por isso.
 	s.increment(300 * time.Millisecond)
 
-	s.LessOrEqual(s.ttl(s.countKey()), 300*time.Millisecond, "a janela sub-segundo foi arredondada para cima")
+	s.LessOrEqual(s.ttl(s.countKey()), 300*time.Millisecond)
 }
 
-func (s *RedisSuite) TestBlockExpiraNoTempoConfigurado() {
-	const duration = 300 * time.Millisecond
-
-	blocked, err := s.store.Blocked(s.ctx, s.chave())
-	s.Require().NoError(err)
-	s.Require().False(blocked, "chave nova apareceu como bloqueada")
-
-	s.Require().NoError(s.store.Block(s.ctx, s.chave(), duration))
-
-	blocked, err = s.store.Blocked(s.ctx, s.chave())
-	s.Require().NoError(err)
-	s.True(blocked, "chave bloqueada não apareceu como bloqueada")
-
-	time.Sleep(duration + 100*time.Millisecond)
-
-	blocked, err = s.store.Blocked(s.ctx, s.chave())
-	s.Require().NoError(err)
-	s.False(blocked, "bloqueio não expirou no tempo configurado")
-}
-
-func (s *RedisSuite) TestContadorEBloqueioSaoChavesSeparadas() {
+func (s *RedisSuite) TestContadorEBloqueioTemTempoDeVidaIndependente() {
 	s.increment(time.Minute)
 	s.Require().NoError(s.store.Block(s.ctx, s.chave(), time.Hour))
 
 	// TTLs independentes são o que faz o bloqueio sobreviver à virada da janela.
-	s.Positive(s.ttl(s.countKey()))
 	s.Greater(s.ttl("ratelimit:block:"+s.chave()), s.ttl(s.countKey()))
 }

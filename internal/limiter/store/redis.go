@@ -43,14 +43,6 @@ func (r *Redis) Close() error {
 	return r.client.Close()
 }
 
-// Increment soma 1 no contador e devolve o total da janela atual.
-//
-// O tempo de vida só é marcado quando a chave não tem um: marcá-lo a cada
-// requisição renovaria a janela e, sob tráfego contínuo, o contador nunca
-// reiniciaria. TTL negativo é chave recém-criada ou órfã de um processo que
-// morreu antes de marcá-la — tratar os dois casos igual é o que faz a requisição
-// seguinte reparar sozinha uma chave que ficou eterna.
-//
 // PEXPIRE, e não EXPIRE, porque a janela pode ser menor que um segundo.
 func (r *Redis) Increment(ctx context.Context, key string, window time.Duration) (int64, error) {
 	countKey := countPrefix + key

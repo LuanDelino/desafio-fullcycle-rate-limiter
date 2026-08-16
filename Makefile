@@ -17,8 +17,11 @@ logs: ## Acompanha o log da aplicação
 test: ## Roda a suíte completa no Docker, com Redis de verdade
 	$(COMPOSE) run --rm test
 
+test-verbose: ## Igual ao test, listando caso a caso
+	$(COMPOSE) run --rm test go test ./... -v
+
 test-unit: ## Roda só o que não precisa de Redis, direto na máquina
-	go test ./... -v
+	go test ./...
 
 build: ## Compila o binário em ./server
 	go build -o server ./cmd/server

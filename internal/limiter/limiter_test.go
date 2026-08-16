@@ -46,11 +46,7 @@ func (s *LimiterSuite) allow(l *limiter.Limiter, ip, token string) limiter.Resul
 }
 
 func (s *LimiterSuite) TestPermiteAteOLimiteDoIPEBloqueiaODepois() {
-	l := s.limiterCom(limiter.Config{
-		IPLimit:       3,
-		Window:        time.Second,
-		BlockDuration: 5 * time.Minute,
-	})
+	l := s.limiterCom(limiter.Config{IPLimit: 3, Window: time.Second, BlockDuration: 5 * time.Minute})
 
 	for i := 1; i <= 3; i++ {
 		s.Truef(s.allow(l, "10.0.0.1", "").Allowed, "requisição %d dentro do limite foi rejeitada", i)
@@ -60,11 +56,7 @@ func (s *LimiterSuite) TestPermiteAteOLimiteDoIPEBloqueiaODepois() {
 }
 
 func (s *LimiterSuite) TestIPsDiferentesTemContadoresIndependentes() {
-	l := s.limiterCom(limiter.Config{
-		IPLimit:       1,
-		Window:        time.Second,
-		BlockDuration: time.Minute,
-	})
+	l := s.limiterCom(limiter.Config{IPLimit: 1, Window: time.Second, BlockDuration: time.Minute})
 
 	s.Require().True(s.allow(l, "10.0.0.1", "").Allowed)
 
@@ -145,11 +137,7 @@ func (s *LimiterSuite) TestIdentidadeEscolhidaApareceNoResultado() {
 }
 
 func (s *LimiterSuite) TestContadorReiniciaNaJanelaSeguinte() {
-	l := s.limiterCom(limiter.Config{
-		IPLimit:       2,
-		Window:        time.Second,
-		BlockDuration: time.Minute,
-	})
+	l := s.limiterCom(limiter.Config{IPLimit: 2, Window: time.Second, BlockDuration: time.Minute})
 
 	s.Require().True(s.allow(l, "10.0.0.1", "").Allowed)
 	s.Require().True(s.allow(l, "10.0.0.1", "").Allowed)
@@ -160,11 +148,7 @@ func (s *LimiterSuite) TestContadorReiniciaNaJanelaSeguinte() {
 }
 
 func (s *LimiterSuite) TestBloqueioSobreviveAoFimDaJanela() {
-	l := s.limiterCom(limiter.Config{
-		IPLimit:       1,
-		Window:        time.Second,
-		BlockDuration: 5 * time.Minute,
-	})
+	l := s.limiterCom(limiter.Config{IPLimit: 1, Window: time.Second, BlockDuration: 5 * time.Minute})
 
 	s.Require().True(s.allow(l, "10.0.0.1", "").Allowed)
 	s.Require().False(s.allow(l, "10.0.0.1", "").Allowed, "a segunda requisição deveria estourar o limite")
@@ -178,11 +162,7 @@ func (s *LimiterSuite) TestBloqueioSobreviveAoFimDaJanela() {
 }
 
 func (s *LimiterSuite) TestRemainingDecrescePorRequisicao() {
-	l := s.limiterCom(limiter.Config{
-		IPLimit:       3,
-		Window:        time.Second,
-		BlockDuration: time.Minute,
-	})
+	l := s.limiterCom(limiter.Config{IPLimit: 3, Window: time.Second, BlockDuration: time.Minute})
 
 	for i, esperado := range []int64{2, 1, 0} {
 		s.Equalf(esperado, s.allow(l, "10.0.0.1", "").Remaining, "Remaining depois da requisição %d", i+1)
