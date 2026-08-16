@@ -211,7 +211,30 @@ func (s *AceitacaoSuite) TestTokenComLimiteMenorTambemValeSobreOIP() {
 	s.Equal(mensagemDoDesafio, corpo)
 }
 
-// 9. Identidades distintas não se contaminam.
+// 9a. A regra de ouro do desafio no caso que mais dói: o IP já estourou e está
+// cumprindo bloqueio, e mesmo assim o token continua até o limite dele. Se a
+// precedência fosse consultada depois do bloqueio, e não antes, o token herdaria
+// a punição do IP e o limite maior não valeria de nada.
+func (s *AceitacaoSuite) TestTokenContinuaAteOLimiteDeleComOIPJaBloqueado() {
+	s.Require().Equal(limitePorIP, s.chamarVezes(limitePorIP+1, ""), "preparo: o IP precisa estourar")
+	s.Require().Len(s.chaves("ratelimit:block:ip:*"), 1, "preparo: o IP precisa estar bloqueado")
+
+	aceitas := s.chamarVezes(limiteGeneroso, tokenGeneroso)
+
+	s.Equal(limiteGeneroso, aceitas, "o token parou antes do limite dele por causa do bloqueio do IP")
+}
+
+// 9b. A independência vale nos dois sentidos: token punido não contamina o IP.
+func (s *AceitacaoSuite) TestIPContinuaAtendendoComUmTokenJaBloqueado() {
+	s.Require().Equal(limiteRestrito, s.chamarVezes(limiteRestrito+1, tokenRestrito), "preparo: o token precisa estourar")
+	s.Require().Len(s.chaves("ratelimit:block:token:*"), 1, "preparo: o token precisa estar bloqueado")
+
+	// Requisição com token não incrementa o contador do IP, então o IP chega
+	// aqui zerado e com o limite dele inteiro disponível.
+	s.Equal(limitePorIP, s.chamarVezes(limitePorIP, ""), "o bloqueio do token vazou para o IP")
+}
+
+// 9c. Identidades distintas não se contaminam.
 func (s *AceitacaoSuite) TestUmTokenBloqueadoNaoDerrubaOutroToken() {
 	s.chamarVezes(limiteRestrito+1, tokenRestrito)
 	s.Require().Len(s.chaves("ratelimit:block:token:*"), 1)

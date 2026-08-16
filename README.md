@@ -13,11 +13,20 @@ Tudo que é infraestrutura — Dockerfile, compose e `.env` — vive em
 make up
 ```
 
-Sobe o Redis e a aplicação na porta 8080. Para conferir:
+Sobe o Redis e a aplicação na porta 8080. Para conferir que respondeu:
 
 ```bash
 curl localhost:8080/
 ```
+
+E para conferir que o limite está mesmo valendo, sem contar requisição na mão:
+
+```bash
+make load
+```
+
+O `loadcheck` dispara carga concorrente de fora do processo e diz se o servidor
+se comportou — detalhes e flags em [Carga contra o servidor no ar](#carga-contra-o-servidor-no-ar).
 
 | Alvo | O que faz |
 |---|---|
@@ -43,10 +52,20 @@ make test
 ```
 
 Os testes usam [testify](https://github.com/stretchr/testify), organizados em uma
-suíte por unidade: `ConfigSuite`, `LimiterSuite`, `RedisSuite`, `RateLimitSuite` e
-`RecoverSuite`. A `RedisSuite` é pulada inteira quando `REDIS_TEST_ADDR` não está
-definido, então `go test ./...` fora do Docker roda só a parte que não precisa de
-Redis.
+suíte por unidade: `AceitacaoSuite`, `ConfigSuite`, `LimiterSuite`,
+`ContratoSuite`, `RedisSuite`, `RateLimitSuite` e `RecoverSuite` — o que cada uma
+cobre está em [Testes](#testes). As que precisam de Redis são puladas inteiras
+quando `REDIS_TEST_ADDR` não está definido, então `go test ./...` fora do Docker
+roda só a parte que não depende dele.
+
+Há duas formas de exercitar o sistema, e elas respondem a perguntas diferentes:
+
+| | `make test` | `make load` |
+|---|---|---|
+| Roda contra | processo do teste, servidor efêmero | o servidor que está no ar |
+| Serve para | provar a regra, caso a caso | provar que o sistema entregue funciona |
+| Quando usar | a cada mudança de código | depois de subir, e em CI pós-deploy |
+| Falha diz | qual asserção quebrou | quantas requisições passaram a mais ou a menos |
 
 Verificação manual do limite por IP (padrão de 10 req/s):
 
@@ -87,15 +106,54 @@ restrito — limpando o Redis entre eles:
 
 O que separa isso de um gerador de carga comum é o veredito. Ele compara o número
 de aceitas com o esperado, confere o corpo de **cada** 429 contra o texto exigido
-no desafio, e sai com código 1 quando algo diverge — dá para pendurar em CI. Para
-apontar em outro alvo ou outro limite:
+no desafio, e **sai com código 1** quando algo diverge — por isso dá para pendurar
+em CI, em vez de alguém ler o relatório e decidir.
+
+### Rodando direto
 
 ```bash
-go run ./cmd/loadcheck -url http://localhost:8080/ -n 150 -c 50 -token abc123 -esperado 100
+go run ./cmd/loadcheck -n 150 -c 50 -token abc123 -esperado 100
+```
+
+| Flag | Padrão | O que faz |
+|---|---|---|
+| `-url` | `http://localhost:8080/` | Endereço a chamar |
+| `-n` | `50` | Quantas requisições disparar no total |
+| `-c` | `10` | Quantas correm ao mesmo tempo |
+| `-token` | vazio | Valor do header `API_KEY`; vazio testa o limite por IP |
+| `-esperado` | `10` | Quantas requisições **devem** ser aceitas |
+
+O `-esperado` é o oráculo: é ele que transforma medição em verificação. Passe o
+limite que vale para a identidade que está sendo testada — `RATE_LIMIT_IP` quando
+não há token, ou o limite do token em `RATE_LIMIT_TOKENS`.
+
+Duas coisas a saber antes de interpretar o resultado:
+
+- **Limpe o Redis entre execuções.** Quem estourou o limite fica bloqueado por
+  `RATE_LIMIT_BLOCK_DURATION` (5 minutos por padrão), e a execução seguinte
+  encontraria zero aceitas. O `make load` já faz isso entre os cenários; rodando
+  direto, use `docker exec rate-limiter-redis redis-cli FLUSHALL`.
+- **`-n` precisa ser maior que `-esperado`.** Sem excedente não há corte para
+  provar, e o programa recusa a execução.
+
+Quando algo diverge, a saída aponta o quê:
+
+```
+  FALHA: 10 requisições aceitas, esperado exatamente 15
+  FALHA: 40 requisições recusadas, esperado 35
+```
+
+Códigos de saída, para uso em CI: `0` tudo como esperado, `1` o servidor não se
+comportou, `2` os argumentos não fazem sentido. Compile antes de usar o código de
+saída — `go run` devolve `1` para qualquer falha, sem distinguir os dois casos:
+
+```bash
+go build -o loadcheck ./cmd/loadcheck && ./loadcheck -n 50 -esperado 10
 ```
 
 Vale a ressalva: a carga sai de uma máquina só, contra uma instância só. Serve
-para verificar a **regra** sob concorrência, não para dimensionar capacidade.
+para verificar a **regra** sob concorrência, não para dimensionar capacidade —
+para isso a carga teria de ser distribuída e o Redis sair do mesmo host.
 
 ## Configuração
 
